@@ -1,0 +1,473 @@
+[info]
+name = "CoffeeCup"
+thinking = '''
+シンプルなコーヒーカップを、「カップ本体（中空の円柱）」と
+「ベジェセグメント＋矩形断面で作るハンドル」の 2 要素で構成する。
+
+- Cup radius は「肉厚の中心半径」
+    外側半径 = Cup radius + Thickness/2
+    内側半径 = Cup radius - Thickness/2
+- カップ本体は outer / inner の 2 本の円柱と Mesh Boolean(DIFFERENCE) で中空化
+- Handle は BezierSegment + Quadrilateral + CurveToMesh で C 字型の矩形断面持ち手を作成する
+'''
+
+# ============================================================
+# Group Input パラメータ
+# ============================================================
+
+[[parameter]]
+name = "Cup radius"
+socket_type = "NodeSocketFloat"
+description = "Center radius of the cup wall thickness"
+subtype = "DISTANCE"
+default_value = 0.04
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Cup height"
+socket_type = "NodeSocketFloat"
+description = "Total height of the cup"
+subtype = "DISTANCE"
+default_value = 0.09
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Thickness"
+socket_type = "NodeSocketFloat"
+description = "Unified thickness for wall, bottom, and handle"
+subtype = "DISTANCE"
+default_value = 0.003
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Handle width"
+socket_type = "NodeSocketFloat"
+description = "How far the handle arches out from the cup (along the X axis)"
+subtype = "DISTANCE"
+default_value = 0.04
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Handle height"
+socket_type = "NodeSocketFloat"
+description = "Total vertical span of the handle arc"
+subtype = "DISTANCE"
+default_value = 0.05
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Handle flat width"
+socket_type = "NodeSocketFloat"
+description = "Width of the handle cross section (flat rectangular direction)"
+subtype = "DISTANCE"
+default_value = 0.015
+min_value = 0.0
+max_value = "inf"
+
+# ============================================================
+# ノード定義
+# ============================================================
+
+# Thickness / 2
+[[node]]
+id   = "thickness_half"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Thickness"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+# R_outer = Cup radius + Thickness/2
+[[node]]
+id   = "radius_outer"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "input.Cup radius"
+
+[node.inputs.Value_001]
+from = "thickness_half.Value"
+
+
+# Outer cylinder
+[[node]]
+id   = "cyl_outer"
+type = "GeometryNodeMeshCylinder"
+
+[node.inputs.Radius]
+from = "radius_outer.Value"
+
+[node.inputs.Depth]
+from = "input.Cup height"
+
+[node.inputs.Vertices]
+value = 64
+
+
+# Outer center Z = Cup height / 2
+[[node]]
+id   = "outer_half_h"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Cup height"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+[[node]]
+id   = "outer_translate"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.Z]
+from = "outer_half_h.Value"
+
+
+[[node]]
+id   = "xform_outer"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cyl_outer.Mesh"
+
+[node.inputs.Translation]
+from = "outer_translate.Vector"
+
+
+# R_inner = Cup radius - Thickness/2
+[[node]]
+id   = "inner_radius"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "input.Cup radius"
+
+[node.inputs.Value_001]
+from = "thickness_half.Value"
+
+
+# Internal height base = Cup height - Thickness
+[[node]]
+id   = "internal_height_base"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "input.Cup height"
+
+[node.inputs.Value_001]
+from = "input.Thickness"
+
+
+# Internal height = base + Thickness
+[[node]]
+id   = "internal_height"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "internal_height_base.Value"
+
+[node.inputs.Value_001]
+from = "input.Thickness"
+
+
+# internal_half_h = Internal height / 2
+[[node]]
+id   = "internal_half_h"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "internal_height.Value"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+# inner_center_z = Thickness + internal_half_h
+[[node]]
+id   = "inner_center_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "input.Thickness"
+
+[node.inputs.Value_001]
+from = "internal_half_h.Value"
+
+
+# Inner cylinder
+[[node]]
+id   = "cyl_inner"
+type = "GeometryNodeMeshCylinder"
+
+[node.inputs.Radius]
+from = "inner_radius.Value"
+
+[node.inputs.Depth]
+from = "internal_height.Value"
+
+[node.inputs.Vertices]
+value = 64
+
+
+[[node]]
+id   = "inner_translate"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.Z]
+from = "inner_center_z.Value"
+
+
+[[node]]
+id   = "xform_inner"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cyl_inner.Mesh"
+
+[node.inputs.Translation]
+from = "inner_translate.Vector"
+
+
+# Boolean: outer - inner
+[[node]]
+id   = "bool_cup"
+type = "GeometryNodeMeshBoolean"
+
+[node.props]
+operation = "DIFFERENCE"
+
+[node.inputs."Mesh 1"]
+from = "xform_outer.Geometry"
+
+[node.inputs."Mesh 2"]
+from = "xform_inner.Geometry"
+
+[node.inputs."Self Intersection"]
+value = false
+
+[node.inputs."Hole Tolerant"]
+value = false
+
+
+# Handle height / 2
+[[node]]
+id   = "handle_half_height"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Handle height"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+# z_top = H + Handle height / 2
+[[node]]
+id   = "z_top"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "outer_half_h.Value"
+
+[node.inputs.Value_001]
+from = "handle_half_height.Value"
+
+
+# z_bottom = H - Handle height / 2
+[[node]]
+id   = "z_bottom"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "outer_half_h.Value"
+
+[node.inputs.Value_001]
+from = "handle_half_height.Value"
+
+
+# Handle start (X = Cup radius, Z = z_bottom)
+[[node]]
+id   = "handle_start"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "input.Cup radius"
+
+[node.inputs.Z]
+from = "z_bottom.Value"
+
+
+# Handle end (X = Cup radius, Z = z_top)
+[[node]]
+id   = "handle_end"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "input.Cup radius"
+
+[node.inputs.Z]
+from = "z_top.Value"
+
+
+# handle_start_handle_x = Cup radius + Handle width
+[[node]]
+id   = "handle_start_handle_x"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "input.Cup radius"
+
+[node.inputs.Value_001]
+from = "input.Handle width"
+
+
+# Start Handle (X = handle_start_handle_x, Z = z_bottom)
+[[node]]
+id   = "handle_start_handle"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "handle_start_handle_x.Value"
+
+[node.inputs.Z]
+from = "z_bottom.Value"
+
+
+# handle_end_handle_x = Cup radius + Handle width
+[[node]]
+id   = "handle_end_handle_x"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "input.Cup radius"
+
+[node.inputs.Value_001]
+from = "input.Handle width"
+
+
+# End Handle (X = handle_end_handle_x, Z = z_top)
+[[node]]
+id   = "handle_end_handle"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "handle_end_handle_x.Value"
+
+[node.inputs.Z]
+from = "z_top.Value"
+
+
+# Bezier segment for handle
+[[node]]
+id   = "handle_curve"
+type = "GeometryNodeCurvePrimitiveBezierSegment"
+
+[node.props]
+mode = "POSITION"
+
+[node.inputs.Start]
+from = "handle_start.Vector"
+
+[node.inputs.End]
+from = "handle_end.Vector"
+
+[node.inputs."Start Handle"]
+from = "handle_start_handle.Vector"
+
+[node.inputs."End Handle"]
+from = "handle_end_handle.Vector"
+
+
+# Handle profile (rectangle)
+[[node]]
+id   = "handle_profile"
+type = "GeometryNodeCurvePrimitiveQuadrilateral"
+
+[node.props]
+mode = "RECTANGLE"
+
+[node.inputs.Width]
+from = "input.Handle flat width"
+
+[node.inputs.Height]
+from = "input.Thickness"
+
+
+# Curve to Mesh
+[[node]]
+id   = "handle_mesh"
+type = "GeometryNodeCurveToMesh"
+
+[node.inputs.Curve]
+from = "handle_curve.Curve"
+
+[node.inputs."Profile Curve"]
+from = "handle_profile.Curve"
+
+
+# Join cup + handle
+[[node]]
+id   = "join"
+type = "GeometryNodeJoinGeometry"
+
+[[node.inputs.Geometry]]
+from = "bool_cup.Mesh"
+
+[[node.inputs.Geometry]]
+from = "handle_mesh.Mesh"
+
+
+# ============================================================
+# Group Output
+# ============================================================
+
+[output.Geometry]
+from = "join.Geometry"

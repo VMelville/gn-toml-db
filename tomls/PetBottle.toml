@@ -1,0 +1,897 @@
+[info]
+name = "PetBottle_SimpleProfile"
+thinking = '''
+ペットボトルを「縦方向のベースカーブ」と、その上で変化するスケール関数で表現し、
+カーブ円を断面とした Curve to Mesh により外形を生成する。
+本バージョンは、底の丸みと首のすぼみを持つシンプルなプロファイルに加え、
+ボトル本体とキャップの UV 展開と UV マップのレイアウト、および単一マテリアルの割り当てまでを
+Geometry Nodes 内で行う。
+
+1. ボトル本体（ベース形状）:
+   - Z=0（底面）から Z=Bottle height（上端）までの直線カーブを
+     GeometryNodeCurvePrimitiveLine で生成する。
+   - そのカーブを GeometryNodeResampleCurve で Count=32 にリサンプルし、
+     縦方向の分割数を揃える。
+   - 断面プロファイルは GeometryNodeCurvePrimitiveCircle で生成し、
+     Body radius を半径とする。
+   - GeometryNodeCurveToMesh の「Curve」にリサンプル済みカーブを、
+     「Profile Curve」に円プロファイルを接続し、Fill Caps = true とする。
+   - Curve to Mesh の「Scale」入力には Spline Parameter の Factor（0〜1）から計算した
+     スケール値 S(t) を接続し、断面半径を Body radius × S(t) として変化させる。
+
+2. スケール関数 S(t):
+   - t = Spline Parameter の Factor（0〜1）をボトルの高さ方向パラメータとみなす。
+   - スケール S(t) は
+       S(t) = 1 - (B(t) + N(t))
+     として定義し、B(t) が「底の丸み」、N(t) が「首（上部）のすぼみ」を表す。
+
+   (1) 底部分の丸み B(t):
+     - 定数 a = 0.05 とする。
+     - 範囲マッピング（範囲制限付き）で
+         t ∈ [0, a] を x ∈ [π/2, 0] にマッピングする。
+     - x を cos に通し、cos(x) を得る（0〜1）。
+     - さらに 2 段目の範囲マッピング（範囲制限付き）で
+         cos(x) ∈ [0, 1] を B(t) ∈ [0.2, 0] にマッピングする。
+       これにより、底面近傍でのみスケールが最大 0.2 だけ減少し、
+       角丸状のボトムが形成される。
+
+   (2) 首部分の曲線 N(t):
+     - 定数 b = 0.8, c = 0.975 とする。
+     - 範囲マッピング（範囲制限付き）で
+         t ∈ [b, c] を y ∈ [0, π/2] にマッピングする。
+     - y を cos に通し、cos(y) を得る（1〜0）。
+     - 首部分の最大「絞り量」NeckScaleMax を、
+         NeckScaleMax = 1 - ((Cap radius - 0.002) / Body radius)
+       として定義する。Cap radius は 0.015 m の定数ノードから取得する。
+     - cos(y) を 2 段目の範囲マッピング（範囲制限付き）で
+         cos(y) ∈ [0, 1] を N(t) ∈ [NeckScaleMax, 0] にマッピングする。
+       これにより、t が首領域に入ると徐々に Body radius から
+       「キャップ近傍の細い半径」へと滑らかに絞られる。
+
+   (3) 最終スケール:
+     - B(t) と N(t) の合計を 1 から引いた
+         S(t) = 1 - (B(t) + N(t))
+       を Curve to Mesh の Scale 入力に接続することで、
+       底と首の両方で丸みとすぼみを持つ断面半径プロファイルを得る。
+
+3. UV 展開:
+   - ボトル本体のメッシュ（Curve to Mesh の出力）に対して、Position から XYZ を分解し、
+       ・Z == 0               → 底面
+       ・Z == Bottle height   → 上面
+       ・Y == 0 かつ X > 0    → 経線上の 1 本
+     の 3 条件を ShaderNodeMath（COMPARE / GREATER_THAN）と MAX/MULTIPLY を用いて OR 結合し、
+     これを GeometryNodeUVUnwrap の Seam 入力に与えることで適切にシームを設定する。
+     COMPARE のしきい値は Value / Value_001 に加え、Epsilon（Value_002）で 1e-5 程度の許容幅を持たせる。
+   - UVUnwrap はフィールドノードとして扱い、出力 UV ベクトルを VectorMath で 0.5 倍し、
+     さらに X 成分に 0.5 を加算して
+       U ∈ [0.5, 1.0], V ∈ [0.0, 0.5]
+     程度になるよう移動する。
+     UVUnwrap の余白（Margin）は 0.1 に設定する。
+   - GeometryNodeStoreNamedAttribute を用いて、ドメイン Face Corner、データ型 Vector2、
+     名前 "UVMap" の属性としてこの UV を書き込む（Geometry 入力には元メッシュを接続）。
+
+   - キャップは Mesh Cylinder（プリミティブ）で UVMap をすでに持っているため、
+     GeometryNodeUVPackIslands を用いてアイランドを再パックする。
+     入力 UV には Mesh Cylinder の "UV Map" 出力を接続し、Margin を 0.1 に設定する。
+     出力された UV を 0.5 倍にスケールし、そのまま StoreNamedAttribute で
+     "UVMap" に書き込むことで、
+       U ∈ [0.0, 0.5], V ∈ [0.0, 0.5]
+     程度の範囲に収める。
+
+4. キャップ:
+   - キャップは GeometryNodeMeshCylinder で生成する。
+   - キャップの半径・高さは、それぞれ ShaderNodeValue の定数ノードとして
+     Cap radius = 0.015 m, Cap height = 0.018 m を用意し、
+     Mesh Cylinder の Radius / Depth、首プロファイルの計算、
+     キャップ中心 Z の計算に再利用する。
+   - キャップ中心の Z 座標は
+       Z_cap_center = Bottle height + Cap height / 2
+     として Math ノードで計算し、GeometryNodeTransform によりその位置に配置する。
+
+5. マテリアル:
+   - Eevee + Principled BSDF を前提に、マテリアルは 1 つ ("PetBottle_Mat") のみ使用する。
+   - UV 空間を U 方向で 0.0〜0.5 をキャップ、0.5〜1.0 をボトル本体としてレイアウトし、
+     Material ノードツリー側では UV の U 成分 > 0.5 をマスクとして Body/Cap のシェーダーをブレンドする。
+   - ボトル本体は半透明でわずかに青みがかったプラスチック、
+     キャップはやや粗い不透明な青色のプラスチックとして表現する。
+   - GeometryNodeSetMaterial の "Material" 入力に "PetBottle_Mat" を指定し、
+     統合後のジオメトリに対してマテリアルを割り当てる。
+
+6. 最終結果:
+   - ボトル本体メッシュ（UVMap 付き）とキャップメッシュ（UVMap 付き）を
+     GeometryNodeJoinGeometry で結合し、最後に GeometryNodeSetMaterial でマテリアルを設定してから
+     グループ出力 "Geometry" として出力する。
+'''
+
+# ============================================================
+# Group Input parameters
+# ============================================================
+
+[[parameter]]
+name = "Bottle height"
+socket_type = "NodeSocketFloat"
+description = "Height of the bottle body (without cap)"
+subtype = "DISTANCE"
+default_value = 0.22
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Body radius"
+socket_type = "NodeSocketFloat"
+description = "Radius of the main cylindrical body"
+subtype = "DISTANCE"
+default_value = 0.035
+min_value = 0.0
+max_value = "inf"
+
+# ============================================================
+# Nodes
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. キャップ寸法の定数ノード
+# ------------------------------------------------------------
+
+[[node]]
+id   = "cap_radius_const"
+type = "ShaderNodeValue"
+
+[node.outputs."Value"]
+value = 0.015   # Cap radius (m)
+
+
+[[node]]
+id   = "cap_height_const"
+type = "ShaderNodeValue"
+
+[node.outputs."Value"]
+value = 0.018   # Cap height (m)
+
+
+# ------------------------------------------------------------
+# 1. ベースカーブ（0〜Bottle height の直線）→ Resample
+# ------------------------------------------------------------
+
+# End.z = Bottle height
+[[node]]
+id   = "end_z"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."Z"]
+from = "input.Bottle height"
+
+
+[[node]]
+id   = "curve_line"
+type = "GeometryNodeCurvePrimitiveLine"
+
+[node.inputs."Start"]
+value = [0.0, 0.0, 0.0]
+
+[node.inputs."End"]
+from = "end_z.Vector"
+
+
+# Resample Curve (COUNT, Count=32)
+[[node]]
+id   = "resample"
+type = "GeometryNodeResampleCurve"
+
+[node.inputs."Mode"]
+value = "Count"
+
+[node.inputs."Curve"]
+from = "curve_line.Curve"
+
+[node.inputs."Count"]
+value = 32
+
+
+# Spline Parameter（Factor 0〜1）
+[[node]]
+id   = "spline_param"
+type = "GeometryNodeSplineParameter"
+
+
+# ------------------------------------------------------------
+# 2. 底部分の丸み B(t)
+#    a = 0.05
+# ------------------------------------------------------------
+
+# MapRange1: t ∈ [0, 0.05] → x ∈ [pi/2, 0]
+[[node]]
+id   = "bottom_map1"
+type = "ShaderNodeMapRange"
+
+[node.props]
+interpolation_type = "LINEAR"
+clamp = true
+
+[node.inputs."Value"]
+from = "spline_param.Factor"
+
+[node.inputs."From Min"]
+value = 0.0
+
+[node.inputs."From Max"]
+value = 0.05
+
+[node.inputs."To Min"]
+value = 1.5707963    # pi/2
+
+[node.inputs."To Max"]
+value = 0.0
+
+
+# cos(x)
+[[node]]
+id   = "bottom_cos"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "COSINE"
+
+[node.inputs."Value"]
+from = "bottom_map1.Result"
+
+
+# MapRange2: cos(x) ∈ [0,1] → B ∈ [0.2, 0]
+[[node]]
+id   = "bottom_map2"
+type = "ShaderNodeMapRange"
+
+[node.props]
+interpolation_type = "LINEAR"
+clamp = true
+
+[node.inputs."Value"]
+from = "bottom_cos.Value"
+
+[node.inputs."From Min"]
+value = 0.0
+
+[node.inputs."From Max"]
+value = 1.0
+
+[node.inputs."To Min"]
+value = 0.2
+
+[node.inputs."To Max"]
+value = 0.0
+
+
+# ------------------------------------------------------------
+# 3. 首部分 N(t)
+# ------------------------------------------------------------
+
+# MapRange1: t ∈ [0.8, 0.975] → y ∈ [0, pi/2]
+[[node]]
+id   = "neck_map1"
+type = "ShaderNodeMapRange"
+
+[node.props]
+interpolation_type = "LINEAR"
+clamp = true
+
+[node.inputs."Value"]
+from = "spline_param.Factor"
+
+[node.inputs."From Min"]
+value = 0.8
+
+[node.inputs."From Max"]
+value = 0.975
+
+[node.inputs."To Min"]
+value = 0.0
+
+[node.inputs."To Max"]
+value = 1.5707963    # pi/2
+
+
+# cos(y)
+[[node]]
+id   = "neck_cos"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "COSINE"
+
+[node.inputs."Value"]
+from = "neck_map1.Result"
+
+
+# (Cap radius - 0.002)
+[[node]]
+id   = "cap_radius_minus"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+from = "cap_radius_const.Value"
+
+[node.inputs."Value_001"]
+value = 0.002
+
+
+# (Cap radius - 0.002) / Body radius
+[[node]]
+id   = "cap_inner_ratio"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "DIVIDE"
+
+[node.inputs."Value"]
+from = "cap_radius_minus.Value"
+
+[node.inputs."Value_001"]
+from = "input.Body radius"
+
+
+# NeckScaleMax = 1 - ratio
+[[node]]
+id   = "neck_scale_max"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+value = 1.0
+
+[node.inputs."Value_001"]
+from = "cap_inner_ratio.Value"
+
+
+# MapRange2: cos(y) ∈ [0,1] → N ∈ [NeckScaleMax, 0]
+[[node]]
+id   = "neck_map2"
+type = "ShaderNodeMapRange"
+
+[node.props]
+interpolation_type = "LINEAR"
+clamp = true
+
+[node.inputs."Value"]
+from = "neck_cos.Value"
+
+[node.inputs."From Min"]
+value = 0.0
+
+[node.inputs."From Max"]
+value = 1.0
+
+[node.inputs."To Min"]
+from = "neck_scale_max.Value"
+
+[node.inputs."To Max"]
+value = 0.0
+
+
+# ------------------------------------------------------------
+# 4. Scale = 1 - (B + N)
+# ------------------------------------------------------------
+
+[[node]]
+id   = "BN_sum"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs."Value"]
+from = "bottom_map2.Result"
+
+[node.inputs."Value_001"]
+from = "neck_map2.Result"
+
+
+[[node]]
+id   = "Scale"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+value = 1.0
+
+[node.inputs."Value_001"]
+from = "BN_sum.Value"
+
+
+# ------------------------------------------------------------
+# 5. Curve Circle プロファイル + Curve to Mesh（Scale 接続）
+# ------------------------------------------------------------
+
+[[node]]
+id   = "profile_circle"
+type = "GeometryNodeCurvePrimitiveCircle"
+
+[node.inputs."Radius"]
+from = "input.Body radius"
+
+[node.inputs."Resolution"]
+value = 32
+
+
+[[node]]
+id   = "curve_to_mesh"
+type = "GeometryNodeCurveToMesh"
+
+[node.inputs."Fill Caps"]
+value = true
+
+[node.inputs."Curve"]
+from = "resample.Curve"
+
+[node.inputs."Profile Curve"]
+from = "profile_circle.Curve"
+
+[node.inputs."Scale"]
+from = "Scale.Value"
+
+
+# ------------------------------------------------------------
+# 6. Body の UV 展開用シーム計算 (Position ベース)
+# ------------------------------------------------------------
+
+[[node]]
+id   = "pos"
+type = "GeometryNodeInputPosition"
+
+
+[[node]]
+id   = "pos_sep"
+type = "ShaderNodeSeparateXYZ"
+
+[node.inputs."Vector"]
+from = "pos.Position"
+
+
+# z == 0 （底）
+[[node]]
+id   = "cmp_z0"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "COMPARE"
+
+[node.inputs."Value"]
+from = "pos_sep.Z"
+
+[node.inputs."Value_001"]
+value = 0.0
+
+[node.inputs."Value_002"]
+value = 1e-5
+
+
+# z == Bottle height （上面）
+[[node]]
+id   = "cmp_zh"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "COMPARE"
+
+[node.inputs."Value"]
+from = "pos_sep.Z"
+
+[node.inputs."Value_001"]
+from = "input.Bottle height"
+
+[node.inputs."Value_002"]
+value = 1e-5
+
+
+# y == 0
+[[node]]
+id   = "cmp_y0"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "COMPARE"
+
+[node.inputs."Value"]
+from = "pos_sep.Y"
+
+[node.inputs."Value_001"]
+value = 0.0
+
+[node.inputs."Value_002"]
+value = 1e-5
+
+
+# x > 0
+[[node]]
+id   = "cmp_x_gt0"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "GREATER_THAN"
+
+[node.inputs."Value"]
+from = "pos_sep.X"
+
+[node.inputs."Value_001"]
+value = 0.0
+
+
+# seam_line = (y==0) AND (x>0)
+[[node]]
+id   = "seam_line"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "cmp_y0.Value"
+
+[node.inputs."Value_001"]
+from = "cmp_x_gt0.Value"
+
+
+# bottom_or_top = max(z==0, z==Bottle height)
+[[node]]
+id   = "bottom_or_top"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MAXIMUM"
+
+[node.inputs."Value"]
+from = "cmp_z0.Value"
+
+[node.inputs."Value_001"]
+from = "cmp_zh.Value"
+
+
+# seam_mask = max(bottom_or_top, seam_line)
+[[node]]
+id   = "seam_mask"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MAXIMUM"
+
+[node.inputs."Value"]
+from = "bottom_or_top.Value"
+
+[node.inputs."Value_001"]
+from = "seam_line.Value"
+
+
+# ------------------------------------------------------------
+# 7. Body UVUnwrap → UV スケーリング＆オフセット → UVMap 書き込み
+# ------------------------------------------------------------
+
+[[node]]
+id   = "uv_unwrap_body"
+type = "GeometryNodeUVUnwrap"
+
+[node.inputs."Seam"]
+from = "seam_mask.Value"
+
+[node.inputs."Margin"]
+value = 0.1
+
+
+# UV を 0.5 倍
+[[node]]
+id   = "body_uv_scale"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Vector"]
+from = "uv_unwrap_body.UV"
+
+[node.inputs."Vector_001"]
+value = [0.5, 0.5, 0.0]
+
+
+# X に 0.5 を加算 → U ∈ [0.5, 1.0] 領域へ
+[[node]]
+id   = "body_uv_offset"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs."Vector"]
+from = "body_uv_scale.Vector"
+
+[node.inputs."Vector_001"]
+value = [0.5, 0.0, 0.0]
+
+
+[[node]]
+id   = "body_store"
+type = "GeometryNodeStoreNamedAttribute"
+
+[node.props]
+data_type = "FLOAT2"
+domain    = "CORNER"
+
+[node.inputs."Geometry"]
+from = "curve_to_mesh.Mesh"
+
+[node.inputs."Name"]
+value = "UVMap"
+
+[node.inputs."Value"]
+from = "body_uv_offset.Vector"
+
+
+# ------------------------------------------------------------
+# 8. キャップ（定数寸法の Mesh Cylinder） + UV アイランド梱包
+# ------------------------------------------------------------
+
+# Cap center Z = Bottle height + Cap height / 2
+[[node]]
+id   = "half_cap_height"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "cap_height_const.Value"
+
+[node.inputs."Value_001"]
+value = 0.5
+
+
+[[node]]
+id   = "cap_center_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs."Value"]
+from = "input.Bottle height"
+
+[node.inputs."Value_001"]
+from = "half_cap_height.Value"
+
+
+[[node]]
+id   = "cap_cylinder"
+type = "GeometryNodeMeshCylinder"
+
+[node.props]
+fill_type = "NGON"
+
+[node.inputs."Vertices"]
+value = 32
+
+[node.inputs."Radius"]
+from = "cap_radius_const.Value"
+
+[node.inputs."Depth"]
+from = "cap_height_const.Value"
+
+
+[[node]]
+id   = "cap_translate"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."Z"]
+from = "cap_center_z.Value"
+
+
+[[node]]
+id   = "xform_cap"
+type = "GeometryNodeTransform"
+
+[node.inputs."Geometry"]
+from = "cap_cylinder.Mesh"
+
+[node.inputs."Translation"]
+from = "cap_translate.Vector"
+
+
+# Cap 用 UV アイランド梱包（元の UVMap を入力）
+[[node]]
+id   = "uv_pack_cap"
+type = "GeometryNodeUVPackIslands"
+
+[node.inputs."UV"]
+from = "cap_cylinder.UV Map"
+
+[node.inputs."Margin"]
+value = 0.1
+
+
+# UV を 0.5 倍 → U ∈ [0.0, 0.5] 領域
+[[node]]
+id   = "cap_uv_scale"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Vector"]
+from = "uv_pack_cap.UV"
+
+[node.inputs."Vector_001"]
+value = [0.5, 0.5, 0.0]
+
+
+[[node]]
+id   = "cap_store"
+type = "GeometryNodeStoreNamedAttribute"
+
+[node.props]
+data_type = "FLOAT2"
+domain    = "CORNER"
+
+[node.inputs."Geometry"]
+from = "xform_cap.Geometry"
+
+[node.inputs."Name"]
+value = "UVMap"
+
+[node.inputs."Value"]
+from = "cap_uv_scale.Vector"
+
+
+# ------------------------------------------------------------
+# 9. Join bottle body + cap
+# ------------------------------------------------------------
+
+[[node]]
+id   = "join"
+type = "GeometryNodeJoinGeometry"
+
+[[node.inputs."Geometry"]]
+from = "body_store.Geometry"
+
+[[node.inputs."Geometry"]]
+from = "cap_store.Geometry"
+
+
+# ------------------------------------------------------------
+# 10. Set Material（PetBottle_Mat を割り当て）
+# ------------------------------------------------------------
+
+[[node]]
+id   = "set_material"
+type = "GeometryNodeSetMaterial"
+
+[node.inputs."Geometry"]
+from = "join.Geometry"
+
+[node.inputs."Selection"]
+value = true
+
+[node.inputs."Material"]
+material = "PetBottle_Mat"
+
+
+# ============================================================
+# Group Output
+# ============================================================
+
+[output."Geometry"]
+from = "set_material.Geometry"
+
+
+# ============================================================
+# Material
+# ============================================================
+
+[material]
+name = "PetBottle_Mat"
+
+# ============================================================
+# ノード定義
+# ============================================================
+
+# UVMap 属性から UV を取得
+[[material.node]]
+id   = "attr_uv"
+type = "ShaderNodeAttribute"
+
+
+[material.node.props]
+attribute_name = "UVMap"
+
+
+[[material.node]]
+id   = "separate_uv"
+type = "ShaderNodeSeparateXYZ"
+
+[material.node.inputs."Vector"]
+from = "attr_uv.Vector"
+
+
+# cap_mask: U < 0.5 の領域を 1、それ以外を 0
+[[material.node]]
+id   = "cap_mask"
+type = "ShaderNodeMath"
+
+[material.node.props]
+operation = "LESS_THAN"
+
+[material.node.inputs."Value"]
+from = "separate_uv.X"
+
+[material.node.inputs."Value_001"]
+value = 0.5
+
+
+# ------------------------------------------------------------
+# Principled BSDF（ボトル本体用）
+# ------------------------------------------------------------
+
+[[material.node]]
+id   = "bsdf_body"
+type = "ShaderNodeBsdfPrincipled"
+
+[material.node.inputs."Base Color"]
+value = [0.85, 0.93, 0.98, 1.0]   # わずかに水色寄りの PET 本体
+
+[material.node.inputs."Roughness"]
+value = 0.03                      # ツルツル
+
+[material.node.inputs."Alpha"]
+value = 0.0                       # 完全透過（レンダー設定に依存して調整）
+
+[material.node.inputs."IOR"]
+value = 1.45                      # PET っぽい屈折率
+
+
+# ------------------------------------------------------------
+# Principled BSDF（キャップ用）
+# ------------------------------------------------------------
+
+[[material.node]]
+id   = "bsdf_cap"
+type = "ShaderNodeBsdfPrincipled"
+
+[material.node.inputs."Base Color"]
+value = [0.98, 0.98, 0.98, 1.0]   # ほぼ白のキャップ
+
+[material.node.inputs."Roughness"]
+value = 0.3                       # ややマット
+
+[material.node.inputs."Alpha"]
+value = 1.0                       # 完全不透明
+
+[material.node.inputs."IOR"]
+value = 1.45                      # とりあえず本体と同じで統一
+
+
+# ------------------------------------------------------------
+# Mix Shader（本体 BSDF とキャップ BSDF をマスクでミックス）
+# ------------------------------------------------------------
+
+[[material.node]]
+id   = "mix_shader"
+type = "ShaderNodeMixShader"
+
+[material.node.inputs."Fac"]
+from = "cap_mask.Value"
+
+[material.node.inputs."Shader"]
+from = "bsdf_body.BSDF"
+
+[material.node.inputs."Shader_001"]
+from = "bsdf_cap.BSDF"
+
+
+# ------------------------------------------------------------
+# Material Output
+# ------------------------------------------------------------
+
+[material.output.Surface]
+from = "mix_shader.Shader"

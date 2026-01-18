@@ -1,0 +1,162 @@
+[info]
+name = "Pencil"
+thinking = '''
+鉛筆は「先端が丸みに近く、持ち手が六角形」の断面を持つ木軸のみを生成する。
+そのために、以下の 2 つのメッシュを用意し、それらのブーリアン交差で形状を得る。
+
+1. 鉛筆の全長（先端を含む）と同じ長さを持つ 24 角錐（Mesh Cone, Vertices=24）を作成する。
+   - Cone の軸方向は +Z とし、Radius Top=0（先端）、Radius Bottom は
+     Body length と Tip angle（先端角度）から計算する。
+   - これにより、先端ほど細く、奥ほど太い円錐状のボリュームが得られる。
+
+2. 持ち手部分の六角断面を表す六角柱（Mesh Cylinder, Vertices=6）を作成する。
+   - 半径は Body radius（六角柱の外接円半径）とし、深さ（Depth）は
+     Body length を2.1倍した長さとする（Z-Fighting を避けるために余裕を持たせる）。
+
+3. 24 角錐と六角柱に対して Mesh Boolean ノードを INTERSECT モードで適用し、
+    両者の共通部分を鉛筆形状とする。
+    - 先端近傍では円錐の方が六角柱より細いため、断面は円錐に近い形（24角）になる。
+   - 持ち手側では円錐の半径が十分大きくなるため、断面は六角形となり、一般的な鉛筆形状に近づく。
+
+先端形状は長さではなく Tip angle（角度）で制御し、
+Body length は先端を含めた鉛筆全体の長さとする。
+芯は本仕様では考慮せず、木軸のみを生成する。
+'''
+
+# ============================================================
+# Group Input parameters
+# ============================================================
+
+[[parameter]]
+name = "Body length"
+socket_type = "NodeSocketFloat"
+description = "Total pencil length including the sharpened tip"
+subtype = "DISTANCE"
+default_value = 0.18
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Body radius"
+socket_type = "NodeSocketFloat"
+description = "Outer radius of the hexagonal body (circumscribed circle radius)"
+subtype = "DISTANCE"
+default_value = 0.005
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Tip angle"
+socket_type = "NodeSocketFloat"
+description = "Angle (in radians) between the pencil axis and the sharpened tip surface"
+subtype = "ANGLE"
+default_value = 0.2094395      # 12 deg in rad
+min_value = 0.0174533          # 1 deg in rad
+max_value = 0.7853982          # 45 deg in rad
+
+# ============================================================
+# Nodes
+# ============================================================
+
+# Tip angle -> tan(angle)
+[[node]]
+id   = "angle_tan"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "TANGENT"
+
+[node.inputs.Value]
+from = "input.Tip angle"
+
+
+# RadiusBottom = Body length * tan(Tip angle)
+[[node]]
+id   = "radius_bottom"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Body length"
+
+[node.inputs.Value_001]
+from = "angle_tan.Value"
+
+
+# 24-sided cone (full pencil length)
+[[node]]
+id   = "cone"
+type = "GeometryNodeMeshCone"
+
+[node.props]
+fill_type = "NGON"
+
+[node.inputs.Vertices]
+value = 24
+
+[node.inputs.Depth]
+from = "input.Body length"
+
+[node.inputs."Radius Top"]
+value = 0.0
+
+[node.inputs."Radius Bottom"]
+from = "radius_bottom.Value"
+
+
+# Depth scale = Body length * 2.1  (for cylinder)
+[[node]]
+id   = "depth_scale"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Body length"
+
+[node.inputs.Value_001]
+value = 2.1
+
+
+# Hexagonal cylinder (body)
+[[node]]
+id   = "cyl"
+type = "GeometryNodeMeshCylinder"
+
+[node.props]
+fill_type = "NGON"
+
+[node.inputs.Vertices]
+value = 6
+
+[node.inputs.Radius]
+from = "input.Body radius"
+
+[node.inputs.Depth]
+from = "depth_scale.Value"
+
+
+# Boolean INTERSECT (cone ∩ cylinder)
+[[node]]
+id   = "bool_pencil"
+type = "GeometryNodeMeshBoolean"
+
+[node.props]
+operation = "INTERSECT"
+
+[[node.inputs."Mesh"]]
+from = "cone.Mesh"
+
+[[node.inputs."Mesh"]]
+from = "cyl.Mesh"
+
+
+# ============================================================
+# Group Output
+# ============================================================
+
+[output.Geometry]
+from = "bool_pencil.Mesh"

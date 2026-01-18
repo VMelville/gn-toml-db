@@ -1,0 +1,226 @@
+[info]
+name = "Eraser"
+thinking = '''
+消しゴムは「本体（白いゴム部分）」と「紙カバー」の2つのパーツから構成される。
+本体・カバーともにメッシュプリミティブのCubeを用いて生成し、パラメータで寸法や露出部を制御する。
+
+1. 本体（ゴム部分）は、ユーザー指定のベクトル（Eraser body size）でサイズを決定し、Mesh Cubeノードで生成する。
+
+2. 紙カバーは、
+    - 本体サイズに対し、厚み（Paper thickness）の2倍をX/Z方向に加算し、
+    - 前後の露出幅（Front/Back exposure width）をY方向から減算することで、
+    - 「body_size + (2T, 0, 2T) - (0, front+back, 0)」の式でカバー全体のサイズを決定する。
+    - さらに、前後露出の差分の半分だけY方向にオフセットし、カバーの中心が本体に合うよう調整する。
+    - これらの計算はMathノード・VectorMathノード・CombineXYZノードで構成される。
+
+3. 本体とカバーの2つのメッシュをJoin Geometryノードで統合し、1つのジオメトリとして出力する。
+'''
+
+# ============================================================
+# Group Input parameters
+# ============================================================
+
+[[parameter]]
+name = "Eraser body size"
+socket_type = "NodeSocketVector"
+description = "Size of the eraser body (rubber part)"
+subtype = "TRANSLATION"
+default_value = [0.02, 0.05, 0.01]
+min_value = 0.0
+
+[[parameter]]
+name = "Paper thickness"
+socket_type = "NodeSocketFloat"
+description = "Thickness of the paper covering the eraser"
+subtype = "DISTANCE"
+default_value = 0.001
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Front exposure width"
+socket_type = "NodeSocketFloat"
+description = "Width of the exposed front part of the eraser"
+subtype = "DISTANCE"
+default_value = 0.01
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Back exposure width"
+socket_type = "NodeSocketFloat"
+description = "Width of the exposed back part of the eraser"
+subtype = "DISTANCE"
+default_value = 0.0001
+min_value = 0.0
+max_value = "inf"
+
+# ============================================================
+# Nodes
+# ============================================================
+
+# Body Cube (eraser main body)
+[[node]]
+id   = "cube_body"
+type = "GeometryNodeMeshCube"
+
+[node.inputs.Size]
+from = "input.Eraser body size"
+
+
+# 2T = Paper thickness * 2
+[[node]]
+id   = "mul2"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Paper thickness"
+
+[node.inputs.Value_001]
+value = 2.0
+
+
+# (2T, 0, 2T)
+[[node]]
+id   = "vec_thickness"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "mul2.Value"
+
+[node.inputs.Z]
+from = "mul2.Value"
+
+
+# body_size + (2T, 0, 2T)
+[[node]]
+id   = "add_thickness"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Vector]
+from = "input.Eraser body size"
+
+[node.inputs.Vector_001]
+from = "vec_thickness.Vector"
+
+
+# front + back
+[[node]]
+id   = "add_exposure"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "input.Front exposure width"
+
+[node.inputs.Value_001]
+from = "input.Back exposure width"
+
+
+# (0, front+back, 0)
+[[node]]
+id   = "vec_exposure"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.Y]
+from = "add_exposure.Value"
+
+
+# paper_size = size_plus - exposure_vec
+[[node]]
+id   = "paper_size"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Vector]
+from = "add_thickness.Vector"
+
+[node.inputs.Vector_001]
+from = "vec_exposure.Vector"
+
+
+# offset_y = (front - back) / 2
+[[node]]
+id   = "diff"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "input.Front exposure width"
+
+[node.inputs.Value_001]
+from = "input.Back exposure width"
+
+
+[[node]]
+id   = "half"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "DIVIDE"
+
+[node.inputs.Value]
+from = "diff.Value"
+
+[node.inputs.Value_001]
+value = 2.0
+
+
+[[node]]
+id   = "offset_vec"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.Y]
+from = "half.Value"
+
+
+# Paper Cube
+[[node]]
+id   = "cube_paper"
+type = "GeometryNodeMeshCube"
+
+[node.inputs.Size]
+from = "paper_size.Vector"
+
+
+[[node]]
+id   = "xform_paper"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_paper.Mesh"
+
+[node.inputs.Translation]
+from = "offset_vec.Vector"
+
+
+# Join Geometry (body + paper)
+[[node]]
+id   = "join"
+type = "GeometryNodeJoinGeometry"
+
+[[node.inputs.Geometry]]
+from = "cube_body.Mesh"
+
+[[node.inputs.Geometry]]
+from = "xform_paper.Mesh"
+
+
+# ============================================================
+# Group Output
+# ============================================================
+
+[output.Geometry]
+from = "join.Geometry"

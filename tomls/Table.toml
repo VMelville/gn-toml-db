@@ -1,0 +1,521 @@
+[info]
+name = "Table"
+thinking = '''
+四つ足のシンプルな机を、「天板」と「4本の脚」の5パーツから構成して生成する。
+さらに、Join した後に UVPackIslands により UV 展開し、Material を 1 つ適用する。
+
+UV 展開方針:
+- 机の全パーツは MeshCube による直方体なので、UV 展開は UVPackIslands で十分である。
+- Join Geometry の直前または直後で UVPackIslands を適用し、
+  出力 UV を 0.5 倍して X=0.5 だけシフトし、UVMap として保存して重なりを防ぐ。
+
+マテリアル:
+- Principled BSDF 1 個で木材風の値を直接設定し、Mix などは使わない。
+- SetMaterial ノードでジオメトリに適用する。
+'''
+
+# ============================================================
+# Group Input parameters
+# ============================================================
+
+[[parameter]]
+name = "Top size"
+socket_type = "NodeSocketVector"
+description = "Size of the tabletop (X: width, Y: depth, Z: thickness)"
+subtype = "TRANSLATION"
+default_value = [0.8, 0.5, 0.03]
+min_value = 0.0
+
+[[parameter]]
+name = "Table height"
+socket_type = "NodeSocketFloat"
+description = "Height from floor to the top surface of the table"
+subtype = "DISTANCE"
+default_value = 0.72
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Leg width"
+socket_type = "NodeSocketFloat"
+description = "Square cross section width of each leg"
+subtype = "DISTANCE"
+default_value = 0.04
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Leg inset"
+socket_type = "NodeSocketFloat"
+description = "Inset distance of legs from the tabletop corners"
+subtype = "DISTANCE"
+default_value = 0.05
+min_value = 0.0
+max_value = "inf"
+
+
+
+# ============================================================
+# Nodes
+# ============================================================
+
+# ------------------------------
+# Top size 分解
+# ------------------------------
+[[node]]
+id   = "sep_top"
+type = "ShaderNodeSeparateXYZ"
+
+[node.inputs."Vector"]
+from = "input.Top size"
+
+
+# 天板厚み / 2
+[[node]]
+id   = "half_top_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "sep_top.Z"
+
+[node.inputs."Value_001"]
+value = 0.5
+
+
+# 天板中心 Z = Table height - Top.size.z/2
+[[node]]
+id   = "top_center_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+from = "input.Table height"
+
+[node.inputs."Value_001"]
+from = "half_top_z.Value"
+
+
+# 天板の MeshCube
+[[node]]
+id   = "cube_top"
+type = "GeometryNodeMeshCube"
+
+[node.inputs."Size"]
+from = "input.Top size"
+
+
+# 天板の位置
+[[node]]
+id   = "top_translate"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."Z"]
+from = "top_center_z.Value"
+
+
+[[node]]
+id   = "xform_top"
+type = "GeometryNodeTransform"
+
+[node.inputs."Geometry"]
+from = "cube_top.Mesh"
+
+[node.inputs."Translation"]
+from = "top_translate.Vector"
+
+
+
+# ------------------------------
+# 脚のサイズ計算
+# ------------------------------
+
+# Leg height = Table height - Top size.z
+[[node]]
+id   = "leg_height"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+from = "input.Table height"
+
+[node.inputs."Value_001"]
+from = "sep_top.Z"
+
+
+# Leg center = LegHeight/2
+[[node]]
+id   = "leg_half_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "leg_height.Value"
+
+[node.inputs."Value_001"]
+value = 0.5
+
+
+# Leg size vector
+[[node]]
+id   = "leg_size"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."X"]
+from = "input.Leg width"
+
+[node.inputs."Y"]
+from = "input.Leg width"
+
+[node.inputs."Z"]
+from = "leg_height.Value"
+
+
+[[node]]
+id   = "cube_leg"
+type = "GeometryNodeMeshCube"
+
+[node.inputs."Size"]
+from = "leg_size.Vector"
+
+
+
+# ------------------------------
+# 脚のオフセット
+# ------------------------------
+
+# half top sizes
+[[node]]
+id   = "half_top_x"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "sep_top.X"
+
+[node.inputs."Value_001"]
+value = 0.5
+
+
+[[node]]
+id   = "half_top_y"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "sep_top.Y"
+
+[node.inputs."Value_001"]
+value = 0.5
+
+
+# hx = half_top_x - inset
+[[node]]
+id   = "hx"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+from = "half_top_x.Value"
+
+[node.inputs."Value_001"]
+from = "input.Leg inset"
+
+
+# hy = half_top_y - inset
+[[node]]
+id   = "hy"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs."Value"]
+from = "half_top_y.Value"
+
+[node.inputs."Value_001"]
+from = "input.Leg inset"
+
+
+# neg versions
+[[node]]
+id   = "neg_hx"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "hx.Value"
+
+[node.inputs."Value_001"]
+value = -1.0
+
+
+[[node]]
+id   = "neg_hy"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Value"]
+from = "hy.Value"
+
+[node.inputs."Value_001"]
+value = -1.0
+
+
+# 4 leg positions
+[[node]]
+id   = "leg_pos_pxp_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."X"]
+from = "hx.Value"
+
+[node.inputs."Y"]
+from = "hy.Value"
+
+[node.inputs."Z"]
+from = "leg_half_z.Value"
+
+
+[[node]]
+id   = "leg_pos_pxn_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."X"]
+from = "hx.Value"
+
+[node.inputs."Y"]
+from = "neg_hy.Value"
+
+[node.inputs."Z"]
+from = "leg_half_z.Value"
+
+
+[[node]]
+id   = "leg_pos_nxp_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."X"]
+from = "neg_hx.Value"
+
+[node.inputs."Y"]
+from = "hy.Value"
+
+[node.inputs."Z"]
+from = "leg_half_z.Value"
+
+
+[[node]]
+id   = "leg_pos_nxn_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs."X"]
+from = "neg_hx.Value"
+
+[node.inputs."Y"]
+from = "neg_hy.Value"
+
+[node.inputs."Z"]
+from = "leg_half_z.Value"
+
+
+
+# ------------------------------
+# Leg transforms
+# ------------------------------
+
+[[node]]
+id   = "leg_tr1"
+type = "GeometryNodeTransform"
+
+[node.inputs."Geometry"]
+from = "cube_leg.Mesh"
+
+[node.inputs."Translation"]
+from = "leg_pos_pxp_y.Vector"
+
+
+[[node]]
+id   = "leg_tr2"
+type = "GeometryNodeTransform"
+
+[node.inputs."Geometry"]
+from = "cube_leg.Mesh"
+
+[node.inputs."Translation"]
+from = "leg_pos_pxn_y.Vector"
+
+
+[[node]]
+id   = "leg_tr3"
+type = "GeometryNodeTransform"
+
+[node.inputs."Geometry"]
+from = "cube_leg.Mesh"
+
+[node.inputs."Translation"]
+from = "leg_pos_nxp_y.Vector"
+
+
+[[node]]
+id   = "leg_tr4"
+type = "GeometryNodeTransform"
+
+[node.inputs."Geometry"]
+from = "cube_leg.Mesh"
+
+[node.inputs."Translation"]
+from = "leg_pos_nxn_y.Vector"
+
+
+
+# ============================================================
+# Join → UVPack → UV書き込み → Material適用
+# ============================================================
+
+# Join table parts
+[[node]]
+id   = "join"
+type = "GeometryNodeJoinGeometry"
+
+[[node.inputs."Geometry"]]
+from = "xform_top.Geometry"
+
+[[node.inputs."Geometry"]]
+from = "leg_tr1.Geometry"
+
+[[node.inputs."Geometry"]]
+from = "leg_tr2.Geometry"
+
+[[node.inputs."Geometry"]]
+from = "leg_tr3.Geometry"
+
+[[node.inputs."Geometry"]]
+from = "leg_tr4.Geometry"
+
+
+# UVPackIslands
+[[node]]
+id   = "uv_pack"
+type = "GeometryNodeUVPackIslands"
+
+[node.inputs."Margin"]
+value = 0.1
+
+
+# Scale UV by 0.5
+[[node]]
+id   = "uv_scale"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs."Vector"]
+from = "uv_pack.UV"
+
+[node.inputs."Vector_001"]
+value = [0.5, 0.5, 0.0]
+
+
+# Offset X by 0.5 (shift UV right)
+[[node]]
+id   = "uv_offset"
+type = "ShaderNodeVectorMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs."Vector"]
+from = "uv_scale.Vector"
+
+[node.inputs."Vector_001"]
+value = [0.5, 0.0, 0.0]
+
+
+# Store UVMap
+[[node]]
+id   = "store_uv"
+type = "GeometryNodeStoreNamedAttribute"
+
+[node.props]
+domain = "CORNER"
+data_type = "FLOAT2"
+
+[node.inputs."Geometry"]
+from = "join.Geometry"
+
+[node.inputs."Name"]
+value = "UVMap"
+
+[node.inputs."Value"]
+from = "uv_offset.Vector"
+
+
+
+# ------------------------------------------------------------
+# SetMaterial (マテリアル名: Table_Mat を使用)
+# ------------------------------------------------------------
+
+[[node]]
+id   = "set_material"
+type = "GeometryNodeSetMaterial"
+
+[node.inputs."Geometry"]
+from = "store_uv.Geometry"
+
+[node.inputs."Material"]
+material = "Table_Mat"
+
+
+
+# ============================================================
+# Group Output
+# ============================================================
+[output.Geometry]
+from = "set_material.Geometry"
+
+
+
+# ============================================================
+# Material
+# ============================================================
+
+[material]
+name = "Table_Mat"
+
+# 木材風の Principled BSDF 1 つ
+[[material.node]]
+id   = "bsdf"
+type = "ShaderNodeBsdfPrincipled"
+
+[material.node.inputs."Base Color"]
+value = [0.55, 0.42, 0.25, 1.0]
+
+[material.node.inputs."Roughness"]
+value = 0.5
+
+[material.node.inputs."Alpha"]
+value = 1.0
+
+
+[material.output.Surface]
+from = "bsdf.BSDF"

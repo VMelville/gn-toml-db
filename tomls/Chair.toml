@@ -1,0 +1,519 @@
+[info]
+name = "Chair"
+thinking = '''
+シンプルな四つ足椅子を、「座面」「4 本の脚」「背もたれ」の 3 要素（計 6 パーツ）で構成して生成する。
+
+1. 座面は Mesh Cube + Transform で、Seat size と Seat height から中心位置を決めて配置する。
+2. 4 本の脚は 1 本の直方体を Cube で作り、座面下に Leg inset 分内側に入れた位置へ 4 回 Transform する。
+3. 背もたれは座面後縁から立ち上がる直方体として Cube で生成し、Back height / Back thickness と Seat size から位置・サイズを決める。
+4. 6 つのパーツを Join Geometry でまとめて椅子形状を得る。
+'''
+
+# ============================================================
+# Group Input parameters
+# ============================================================
+
+[[parameter]]
+name = "Seat size"
+socket_type = "NodeSocketVector"
+description = "Size of the seat (X: width, Y: depth, Z: thickness)"
+subtype = "TRANSLATION"
+default_value = [0.45, 0.45, 0.04]
+min_value = 0.0
+
+[[parameter]]
+name = "Seat height"
+socket_type = "NodeSocketFloat"
+description = "Height from floor to the top surface of the seat"
+subtype = "DISTANCE"
+default_value = 0.45
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Leg width"
+socket_type = "NodeSocketFloat"
+description = "Square cross section width of each leg"
+subtype = "DISTANCE"
+default_value = 0.04
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Leg inset"
+socket_type = "NodeSocketFloat"
+description = "Inset distance of legs from the seat corners"
+subtype = "DISTANCE"
+default_value = 0.05
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Back height"
+socket_type = "NodeSocketFloat"
+description = "Height of the backrest above the seat top"
+subtype = "DISTANCE"
+default_value = 0.5
+min_value = 0.0
+max_value = "inf"
+
+[[parameter]]
+name = "Back thickness"
+socket_type = "NodeSocketFloat"
+description = "Thickness of the backrest along the depth (Y axis)"
+subtype = "DISTANCE"
+default_value = 0.03
+min_value = 0.0
+max_value = "inf"
+
+# ============================================================
+# Nodes
+# ============================================================
+
+# Seat size の分解（X, Y, Z）
+[[node]]
+id   = "sep_seat"
+type = "ShaderNodeSeparateXYZ"
+
+[node.inputs.Vector]
+from = "input.Seat size"
+
+
+# Seat size の半分 (X, Y, Z)
+[[node]]
+id   = "half_seat_x"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "sep_seat.X"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+[[node]]
+id   = "half_seat_y"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "sep_seat.Y"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+[[node]]
+id   = "half_seat_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "sep_seat.Z"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+# 座面中心 Z: Seat height - Seat size.z / 2
+[[node]]
+id   = "seat_center_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "input.Seat height"
+
+[node.inputs.Value_001]
+from = "half_seat_z.Value"
+
+
+# 座面 Mesh Cube
+[[node]]
+id   = "cube_seat"
+type = "GeometryNodeMeshCube"
+
+[node.inputs.Size]
+from = "input.Seat size"
+
+
+[[node]]
+id   = "seat_translate"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.Z]
+from = "seat_center_z.Value"
+
+
+[[node]]
+id   = "xform_seat"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_seat.Mesh"
+
+[node.inputs.Translation]
+from = "seat_translate.Vector"
+
+
+# 脚の高さ: Leg height = Seat height - Seat size.z
+[[node]]
+id   = "leg_height"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "input.Seat height"
+
+[node.inputs.Value_001]
+from = "sep_seat.Z"
+
+
+# Leg height / 2 （脚中心 Z）
+[[node]]
+id   = "leg_half_z"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "leg_height.Value"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+# 脚サイズ: (Leg width, Leg width, Leg height)
+[[node]]
+id   = "leg_size"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "input.Leg width"
+
+[node.inputs.Y]
+from = "input.Leg width"
+
+[node.inputs.Z]
+from = "leg_height.Value"
+
+
+[[node]]
+id   = "cube_leg"
+type = "GeometryNodeMeshCube"
+
+[node.inputs.Size]
+from = "leg_size.Vector"
+
+
+# 脚オフセット hx, hy
+# hx = Seat size.x / 2 - Leg inset
+[[node]]
+id   = "hx"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "half_seat_x.Value"
+
+[node.inputs.Value_001]
+from = "input.Leg inset"
+
+
+# hy = Seat size.y / 2 - Leg inset
+[[node]]
+id   = "hy"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "half_seat_y.Value"
+
+[node.inputs.Value_001]
+from = "input.Leg inset"
+
+
+# -hx, -hy
+[[node]]
+id   = "neg_hx"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "hx.Value"
+
+[node.inputs.Value_001]
+value = -1.0
+
+
+[[node]]
+id   = "neg_hy"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "hy.Value"
+
+[node.inputs.Value_001]
+value = -1.0
+
+
+# 4 本の脚の Translation ベクトル
+# ( +hx, +hy, leg_half_z )
+[[node]]
+id   = "leg_pos_pxp_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "hx.Value"
+
+[node.inputs.Y]
+from = "hy.Value"
+
+[node.inputs.Z]
+from = "leg_half_z.Value"
+
+
+# ( +hx, -hy, leg_half_z )
+[[node]]
+id   = "leg_pos_pxn_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "hx.Value"
+
+[node.inputs.Y]
+from = "neg_hy.Value"
+
+[node.inputs.Z]
+from = "leg_half_z.Value"
+
+
+# ( -hx, +hy, leg_half_z )
+[[node]]
+id   = "leg_pos_nxp_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "neg_hx.Value"
+
+[node.inputs.Y]
+from = "hy.Value"
+
+[node.inputs.Z]
+from = "leg_half_z.Value"
+
+
+# ( -hx, -hy, leg_half_z )
+[[node]]
+id   = "leg_pos_nxn_y"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "neg_hx.Value"
+
+[node.inputs.Y]
+from = "neg_hy.Value"
+
+[node.inputs.Z]
+from = "leg_half_z.Value"
+
+
+# 4 本の脚 Transform
+[[node]]
+id   = "leg_tr1"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_leg.Mesh"
+
+[node.inputs.Translation]
+from = "leg_pos_pxp_y.Vector"
+
+
+[[node]]
+id   = "leg_tr2"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_leg.Mesh"
+
+[node.inputs.Translation]
+from = "leg_pos_pxn_y.Vector"
+
+
+[[node]]
+id   = "leg_tr3"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_leg.Mesh"
+
+[node.inputs.Translation]
+from = "leg_pos_nxp_y.Vector"
+
+
+[[node]]
+id   = "leg_tr4"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_leg.Mesh"
+
+[node.inputs.Translation]
+from = "leg_pos_nxn_y.Vector"
+
+
+# 背もたれサイズ: (Seat size.x, Back thickness, Back height)
+[[node]]
+id   = "back_size"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.X]
+from = "sep_seat.X"
+
+[node.inputs.Y]
+from = "input.Back thickness"
+
+[node.inputs.Z]
+from = "input.Back height"
+
+
+[[node]]
+id   = "cube_back"
+type = "GeometryNodeMeshCube"
+
+[node.inputs.Size]
+from = "back_size.Vector"
+
+
+# y_back_center = Seat size.y / 2 - Back thickness / 2
+[[node]]
+id   = "half_back_thick"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Back thickness"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+[[node]]
+id   = "y_back_center"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "SUBTRACT"
+
+[node.inputs.Value]
+from = "half_seat_y.Value"
+
+[node.inputs.Value_001]
+from = "half_back_thick.Value"
+
+
+# z_back_center = Seat height + Back height / 2
+[[node]]
+id   = "half_back_height"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "MULTIPLY"
+
+[node.inputs.Value]
+from = "input.Back height"
+
+[node.inputs.Value_001]
+value = 0.5
+
+
+[[node]]
+id   = "z_back_center"
+type = "ShaderNodeMath"
+
+[node.props]
+operation = "ADD"
+
+[node.inputs.Value]
+from = "input.Seat height"
+
+[node.inputs.Value_001]
+from = "half_back_height.Value"
+
+
+[[node]]
+id   = "back_translate"
+type = "ShaderNodeCombineXYZ"
+
+[node.inputs.Y]
+from = "y_back_center.Value"
+
+[node.inputs.Z]
+from = "z_back_center.Value"
+
+
+[[node]]
+id   = "xform_back"
+type = "GeometryNodeTransform"
+
+[node.inputs.Geometry]
+from = "cube_back.Mesh"
+
+[node.inputs.Translation]
+from = "back_translate.Vector"
+
+
+# Join Geometry（座面 + 4本脚 + 背もたれ）
+[[node]]
+id   = "join"
+type = "GeometryNodeJoinGeometry"
+
+[[node.inputs.Geometry]]
+from = "xform_seat.Geometry"
+
+[[node.inputs.Geometry]]
+from = "leg_tr1.Geometry"
+
+[[node.inputs.Geometry]]
+from = "leg_tr2.Geometry"
+
+[[node.inputs.Geometry]]
+from = "leg_tr3.Geometry"
+
+[[node.inputs.Geometry]]
+from = "leg_tr4.Geometry"
+
+[[node.inputs.Geometry]]
+from = "xform_back.Geometry"
+
+
+# ============================================================
+# Group Output
+# ============================================================
+
+[output.Geometry]
+from = "join.Geometry"
