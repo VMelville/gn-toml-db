@@ -1,0 +1,142 @@
+info:
+  name: "Eraser"
+  thinking: |
+    消しゴムは「本体（白いゴム部分）」と「紙カバー」の2つのパーツから構成される。
+    本体・カバーともにメッシュプリミティブのCubeを用いて生成し、パラメータで寸法や露出部を制御する。
+    
+    1. 本体（ゴム部分）は、ユーザー指定のベクトル（Eraser body size）でサイズを決定し、Mesh Cubeノードで生成する。
+    
+    2. 紙カバーは、
+        - 本体サイズに対し、厚み（Paper thickness）の2倍をX/Z方向に加算し、
+        - 前後の露出幅（Front/Back exposure width）をY方向から減算することで、
+        - 「body_size + (2T, 0, 2T) - (0, front+back, 0)」の式でカバー全体のサイズを決定する。
+        - さらに、前後露出の差分の半分だけY方向にオフセットし、カバーの中心が本体に合うよう調整する。
+        - これらの計算はMathノード・VectorMathノード・CombineXYZノードで構成される。
+    
+    3. 本体とカバーの2つのメッシュをJoin Geometryノードで統合し、1つのジオメトリとして出力する。
+parameter:
+  - name: "Eraser body size"
+    socket_type: "NodeSocketVector"
+    description: "Size of the eraser body (rubber part)"
+    subtype: "TRANSLATION"
+    default_value: [0.02, 0.05, 0.01]
+    min_value: 0.0
+  - name: "Paper thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the paper covering the eraser"
+    subtype: "DISTANCE"
+    default_value: 0.001
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Front exposure width"
+    socket_type: "NodeSocketFloat"
+    description: "Width of the exposed front part of the eraser"
+    subtype: "DISTANCE"
+    default_value: 0.01
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Back exposure width"
+    socket_type: "NodeSocketFloat"
+    description: "Width of the exposed back part of the eraser"
+    subtype: "DISTANCE"
+    default_value: 0.0001
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "cube_body"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "input.Eraser body size"
+  - id: "mul2"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Paper thickness"
+      Value_001:
+        value: 2.0
+  - id: "vec_thickness"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "mul2.Value"
+      Z:
+        from: "mul2.Value"
+  - id: "add_thickness"
+    type: "ShaderNodeVectorMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Vector:
+        from: "input.Eraser body size"
+      Vector_001:
+        from: "vec_thickness.Vector"
+  - id: "add_exposure"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Front exposure width"
+      Value_001:
+        from: "input.Back exposure width"
+  - id: "vec_exposure"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Y:
+        from: "add_exposure.Value"
+  - id: "paper_size"
+    type: "ShaderNodeVectorMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Vector:
+        from: "add_thickness.Vector"
+      Vector_001:
+        from: "vec_exposure.Vector"
+  - id: "diff"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Front exposure width"
+      Value_001:
+        from: "input.Back exposure width"
+  - id: "half"
+    type: "ShaderNodeMath"
+    props:
+      operation: "DIVIDE"
+    inputs:
+      Value:
+        from: "diff.Value"
+      Value_001:
+        value: 2.0
+  - id: "offset_vec"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Y:
+        from: "half.Value"
+  - id: "cube_paper"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "paper_size.Vector"
+  - id: "xform_paper"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_paper.Mesh"
+      Translation:
+        from: "offset_vec.Vector"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "cube_body.Mesh"
+        - from: "xform_paper.Geometry"
+output:
+  Geometry:
+    from: "join.Geometry"

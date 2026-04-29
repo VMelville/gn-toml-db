@@ -1,0 +1,292 @@
+info:
+  name: "CoffeeCup"
+  thinking: |
+    シンプルなコーヒーカップを、「カップ本体（中空の円柱）」と
+    「ベジェセグメント＋矩形断面で作るハンドル」の 2 要素で構成する。
+    
+    - Cup radius は「肉厚の中心半径」
+        外側半径 = Cup radius + Thickness/2
+        内側半径 = Cup radius - Thickness/2
+    - カップ本体は outer / inner の 2 本の円柱と Mesh Boolean(DIFFERENCE) で中空化
+    - Handle は BezierSegment + Quadrilateral + CurveToMesh で C 字型の矩形断面持ち手を作成する
+parameter:
+  - name: "Cup radius"
+    socket_type: "NodeSocketFloat"
+    description: "Center radius of the cup wall thickness"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Cup height"
+    socket_type: "NodeSocketFloat"
+    description: "Total height of the cup"
+    subtype: "DISTANCE"
+    default_value: 0.09
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Unified thickness for wall, bottom, and handle"
+    subtype: "DISTANCE"
+    default_value: 0.003
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Handle width"
+    socket_type: "NodeSocketFloat"
+    description: "How far the handle arches out from the cup (along the X axis)"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Handle height"
+    socket_type: "NodeSocketFloat"
+    description: "Total vertical span of the handle arc"
+    subtype: "DISTANCE"
+    default_value: 0.05
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Handle flat width"
+    socket_type: "NodeSocketFloat"
+    description: "Width of the handle cross section (flat rectangular direction)"
+    subtype: "DISTANCE"
+    default_value: 0.015
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "thickness_half"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Thickness"
+      Value_001:
+        value: 0.5
+  - id: "radius_outer"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Cup radius"
+      Value_001:
+        from: "thickness_half.Value"
+  - id: "cyl_outer"
+    type: "GeometryNodeMeshCylinder"
+    inputs:
+      Radius:
+        from: "radius_outer.Value"
+      Depth:
+        from: "input.Cup height"
+      Vertices:
+        value: 64
+  - id: "outer_half_h"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Cup height"
+      Value_001:
+        value: 0.5
+  - id: "outer_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "outer_half_h.Value"
+  - id: "xform_outer"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cyl_outer.Mesh"
+      Translation:
+        from: "outer_translate.Vector"
+  - id: "inner_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Cup radius"
+      Value_001:
+        from: "thickness_half.Value"
+  - id: "internal_height_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Cup height"
+      Value_001:
+        from: "input.Thickness"
+  - id: "internal_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "internal_height_base.Value"
+      Value_001:
+        from: "input.Thickness"
+  - id: "internal_half_h"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "internal_height.Value"
+      Value_001:
+        value: 0.5
+  - id: "inner_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Thickness"
+      Value_001:
+        from: "internal_half_h.Value"
+  - id: "cyl_inner"
+    type: "GeometryNodeMeshCylinder"
+    inputs:
+      Radius:
+        from: "inner_radius.Value"
+      Depth:
+        from: "internal_height.Value"
+      Vertices:
+        value: 64
+  - id: "inner_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "inner_center_z.Value"
+  - id: "xform_inner"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cyl_inner.Mesh"
+      Translation:
+        from: "inner_translate.Vector"
+  - id: "bool_cup"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "DIFFERENCE"
+    inputs:
+      Mesh:
+        - from: "xform_outer.Geometry"
+        - from: "xform_inner.Geometry"
+      Self Intersection:
+        value: false
+      Hole Tolerant:
+        value: false
+  - id: "handle_half_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Handle height"
+      Value_001:
+        value: 0.5
+  - id: "z_top"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "outer_half_h.Value"
+      Value_001:
+        from: "handle_half_height.Value"
+  - id: "z_bottom"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "outer_half_h.Value"
+      Value_001:
+        from: "handle_half_height.Value"
+  - id: "handle_start"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Cup radius"
+      Z:
+        from: "z_bottom.Value"
+  - id: "handle_end"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Cup radius"
+      Z:
+        from: "z_top.Value"
+  - id: "handle_start_handle_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Cup radius"
+      Value_001:
+        from: "input.Handle width"
+  - id: "handle_start_handle"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "handle_start_handle_x.Value"
+      Z:
+        from: "z_bottom.Value"
+  - id: "handle_end_handle_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Cup radius"
+      Value_001:
+        from: "input.Handle width"
+  - id: "handle_end_handle"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "handle_end_handle_x.Value"
+      Z:
+        from: "z_top.Value"
+  - id: "handle_curve"
+    type: "GeometryNodeCurvePrimitiveBezierSegment"
+    props:
+      mode: "POSITION"
+    inputs:
+      Start:
+        from: "handle_start.Vector"
+      End:
+        from: "handle_end.Vector"
+      Start Handle:
+        from: "handle_start_handle.Vector"
+      End Handle:
+        from: "handle_end_handle.Vector"
+  - id: "handle_profile"
+    type: "GeometryNodeCurvePrimitiveQuadrilateral"
+    props:
+      mode: "RECTANGLE"
+    inputs:
+      Width:
+        from: "input.Handle flat width"
+      Height:
+        from: "input.Thickness"
+  - id: "handle_mesh"
+    type: "GeometryNodeCurveToMesh"
+    inputs:
+      Curve:
+        from: "handle_curve.Curve"
+      Profile Curve:
+        from: "handle_profile.Curve"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "bool_cup.Mesh"
+        - from: "handle_mesh.Mesh"
+output:
+  Geometry:
+    from: "join.Geometry"

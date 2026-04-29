@@ -1,0 +1,302 @@
+info:
+  name: "Table"
+  thinking: |
+    四つ足のシンプルな机を、「天板」と「4本の脚」の5パーツから構成して生成する。
+    さらに、Join した後に UVPackIslands により UV 展開し、Material を 1 つ適用する。
+    
+    UV 展開方針:
+    - 机の全パーツは MeshCube による直方体なので、UV 展開は UVPackIslands で十分である。
+    - Join Geometry の直前または直後で UVPackIslands を適用し、
+      出力 UV を 0.5 倍して X=0.5 だけシフトし、UVMap として保存して重なりを防ぐ。
+    
+    マテリアル:
+    - Principled BSDF 1 個で木材風の値を直接設定し、Mix などは使わない。
+    - SetMaterial ノードでジオメトリに適用する。
+parameter:
+  - name: "Top size"
+    socket_type: "NodeSocketVector"
+    description: "Size of the tabletop (X: width, Y: depth, Z: thickness)"
+    subtype: "TRANSLATION"
+    default_value: [0.8, 0.5, 0.03]
+    min_value: 0.0
+  - name: "Table height"
+    socket_type: "NodeSocketFloat"
+    description: "Height from floor to the top surface of the table"
+    subtype: "DISTANCE"
+    default_value: 0.72
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg width"
+    socket_type: "NodeSocketFloat"
+    description: "Square cross section width of each leg"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg inset"
+    socket_type: "NodeSocketFloat"
+    description: "Inset distance of legs from the tabletop corners"
+    subtype: "DISTANCE"
+    default_value: 0.05
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "sep_top"
+    type: "ShaderNodeSeparateXYZ"
+    inputs:
+      Vector:
+        from: "input.Top size"
+  - id: "half_top_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_top.Z"
+      Value_001:
+        value: 0.5
+  - id: "top_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Table height"
+      Value_001:
+        from: "half_top_z.Value"
+  - id: "cube_top"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "input.Top size"
+  - id: "top_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "top_center_z.Value"
+  - id: "xform_top"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_top.Mesh"
+      Translation:
+        from: "top_translate.Vector"
+  - id: "leg_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Table height"
+      Value_001:
+        from: "sep_top.Z"
+  - id: "leg_half_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "leg_height.Value"
+      Value_001:
+        value: 0.5
+  - id: "leg_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Leg width"
+      Y:
+        from: "input.Leg width"
+      Z:
+        from: "leg_height.Value"
+  - id: "cube_leg"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "leg_size.Vector"
+  - id: "half_top_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_top.X"
+      Value_001:
+        value: 0.5
+  - id: "half_top_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_top.Y"
+      Value_001:
+        value: 0.5
+  - id: "hx"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_top_x.Value"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "hy"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_top_y.Value"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "neg_hx"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "hx.Value"
+      Value_001:
+        value: -1.0
+  - id: "neg_hy"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "hy.Value"
+      Value_001:
+        value: -1.0
+  - id: "leg_pos_pxp_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "hx.Value"
+      Y:
+        from: "hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_pos_pxn_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "hx.Value"
+      Y:
+        from: "neg_hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_pos_nxp_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_hx.Value"
+      Y:
+        from: "hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_pos_nxn_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_hx.Value"
+      Y:
+        from: "neg_hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_tr1"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_pxp_y.Vector"
+  - id: "leg_tr2"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_pxn_y.Vector"
+  - id: "leg_tr3"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_nxp_y.Vector"
+  - id: "leg_tr4"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_nxn_y.Vector"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "xform_top.Geometry"
+        - from: "leg_tr1.Geometry"
+        - from: "leg_tr2.Geometry"
+        - from: "leg_tr3.Geometry"
+        - from: "leg_tr4.Geometry"
+  - id: "uv_pack"
+    type: "GeometryNodeUVPackIslands"
+    inputs:
+      Margin:
+        value: 0.1
+  - id: "uv_scale"
+    type: "ShaderNodeVectorMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Vector:
+        from: "uv_pack.UV"
+      Vector_001:
+        value: [0.5, 0.5, 0.0]
+  - id: "uv_offset"
+    type: "ShaderNodeVectorMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Vector:
+        from: "uv_scale.Vector"
+      Vector_001:
+        value: [0.5, 0.0, 0.0]
+  - id: "store_uv"
+    type: "GeometryNodeStoreNamedAttribute"
+    props:
+      domain: "CORNER"
+      data_type: "FLOAT2"
+    inputs:
+      Geometry:
+        from: "join.Geometry"
+      Name:
+        value: "UVMap"
+      Value:
+        from: "uv_offset.Vector"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "store_uv.Geometry"
+      Material:
+        material: "Table_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "Table_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.55, 0.42, 0.25, 1.0]
+        Roughness:
+          value: 0.5
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"

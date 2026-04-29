@@ -1,160 +1,202 @@
 # Blender Geometry Nodes IR Add-on
 
-このアドオンは、Blender 内の Text データブロックに記述された **TOML 形式の中間表現 (IR)** を読み取り、  
-対応する **Geometry Nodes ノードグループとオブジェクト** を自動生成します。
+このプロジェクトは、指定フォルダ内の **YAML 形式の中間表現 (IR)** ファイルを読み取り、  
+対応する **Geometry Nodes ノードグループ / オブジェクト / Material** を生成するアドオンです。
+
+TOML は配列やネストが増えると記述が冗長になりやすいため、このリポジトリでは **TOML を廃止し、YAML に完全移行** しています。
 
 ## 機能概要
 
-- Blender 上の任意の Text（TOML）を選び、Geometry Nodes を生成
-- ノード作成、ソケット接続、Group Input/Output の構築を IR に基づき自動化
-- 同じ IR を何度実行しても安全なように、ノードツリーやオブジェクトを適切に再構築
-- Add-on メニューから操作可能
+- 指定フォルダ内の YAML ファイルをドロップダウン選択して Geometry Nodes を生成
+- ノード作成、ソケット接続、Group Input/Output 構築を IR から自動化
+- Material ノードツリーの構築と割り当てにも対応
+- 同じ IR を再実行しても壊れにくいよう、ノードツリーやオブジェクトを再構築
+- `PyYAML` には依存せず、単一ファイル内蔵の軽量 YAML パーサで動作
 
----
+## ファイル構成
 
-## インストール方法
+- `gn_from_yaml_ir.py`
+  Add-on 本体と YAML パーサをまとめた単一ファイル
+- `yamls/*.yaml`
+  サンプル IR
 
-1. 本アドオンを ZIP 化する  
-   （`__init__.py` を含むフォルダを zip 圧縮）
+## インストール
 
-2. Blender で  
-   **編集 > プリファレンス > アドオン > インストール…**  
-   から ZIP を選択してインストール
-
-3. 「Geometry Nodes IR Builder」を有効化
-
----
+1. `gn_from_yaml_ir.py` をそのまま使うか、必要なら単体で配布します。
+2. Blender で **編集 > プリファレンス > アドオン > インストール…** を開きます。
+3. `gn_from_yaml_ir.py` を選択してインストールし、アドオンを有効化します。
 
 ## 使い方
 
-### 1. IR（TOML）を書く
+### 1. YAML IR ファイルを用意する
 
-Blender の「テキストエディター」に以下のような TOML を記述します。
+```yaml
+info:
+  name: "MyObject"
 
-```toml
-[info]
-name = "MyObject"
+node:
+  - id: "cube"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        value: [1.0, 1.0, 1.0]
 
-[[node]]
-id = "cube"
-type = "GeometryNodeMeshCube"
-
-[node.inputs.Size]
-value = [1.0, 1.0, 1.0]
-
-[output.Geometry]
-from = "cube.Mesh"
+output:
+  Geometry:
+    from: "cube.Mesh"
 ```
 
-### 2. Add-on パネルからビルド
+### 2. Add-on パネルから Build する
 
-3D ビューの右側（N パネル）に新しく追加される
+3D ビュー右側の N パネルに追加される **YAML IR** タブを開きます。
 
-**Geometry Nodes IR**
+- `Folder` に YAML ファイルを置いたディレクトリを指定
+- `YAML` ドロップダウンから対象ファイルを選択
+- `Build` を押す
 
-というパネルを開きます。
+すると Geometry Nodes ノードグループとオブジェクトが生成されます。
 
-- 「IR テキストを選択」 で Text ブロック名を選択
-- 「Build Geometry Nodes」ボタンを押すと  
-  → Geometry Nodes ノードグループとオブジェクトが生成されます
+Blender の相対パスも使えるので、たとえば `.blend` ファイル基準で `//yamls/` のような指定もできます。
 
----
+## YAML IR の構造
 
-## TOML IR の構造
+### `info`
 
-### [info]
+生成物の名前など、IR 全体のメタ情報です。
 
-| キー | 説明 |
-|------|------|
-| name | 生成するノードグループおよびオブジェクト名 |
-
----
-
-### [[parameter]]
-
-Group Input に追加されるパラメーター定義です。
-
-```toml
-[[parameter]]
-name = "Bottle height"
-socket_type = "NodeSocketFloat"
-default_value = 0.22
+```yaml
+info:
+  name: "MyObject"
 ```
 
----
+### `parameter`
 
-### [[node]]
+Group Input に追加するパラメータ定義です。
 
-ノードを作成し、ID で管理します。
-
-```toml
-[[node]]
-id   = "resample"
-type = "GeometryNodeResampleCurve"
+```yaml
+parameter:
+  - name: "Bottle height"
+    socket_type: "NodeSocketFloat"
+    default_value: 0.22
 ```
 
----
+### `node`
 
-### [node.inputs.<ソケット名>]
+ノード定義の配列です。各要素は `id` と `type` を持ちます。
 
-ノードの入力ソケットへ
-
-- 定数値（value）
-- 別ノードの出力（from）
-
-を接続できます。
-
-```toml
-[node.inputs.Count]
-value = 64
-
-[node.inputs.Curve]
-from = "curve_line.Curve"
+```yaml
+node:
+  - id: "resample"
+    type: "GeometryNodeResampleCurve"
 ```
 
-複数入力が可能なソケット（Join Geometry など）は配列で記述します。
+### `inputs`
 
-```toml
-[[node.inputs.Geometry]]
-from = "a.Mesh"
+入力ソケットには次のいずれかを指定できます。
 
-[[node.inputs.Geometry]]
-from = "b.Mesh"
+- `from`: 他ノード出力とのリンク
+- `value`: 定数値
+- `material`: Material データブロック名
+
+```yaml
+node:
+  - id: "cube"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        value: [1.0, 1.0, 1.0]
 ```
 
----
+複数入力ソケットは配列で書けます。
 
-### [output]
-
-Group Output へ接続する終端ノードを指定します。
-
-```toml
-[output.Geometry]
-from = "join.Geometry"
+```yaml
+node:
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "a.Mesh"
+        - from: "b.Mesh"
 ```
 
----
+### `outputs`
 
-## 冪等性（再実行しても壊れない設計）
+Value ノードなど、出力ソケットの `default_value` を設定したいときに使います。
 
-このアドオンは複数回実行しても正しく動作するよう設計されています。
+```yaml
+node:
+  - id: "cap_radius_const"
+    type: "ShaderNodeValue"
+    outputs:
+      Value:
+        value: 0.015
+```
 
-- 既存のノードツリーはクリアしたうえで安全に再構築
-- 既存オブジェクトがある場合は再利用し、Geometry Nodes モディファイアのみ更新
-- Text が変更されても毎回同じ結果が生成される
+### `output`
 
----
+Group Output への接続先です。
+
+```yaml
+output:
+  Geometry:
+    from: "join.Geometry"
+```
+
+### `material`
+
+Material ノードツリーを IR で構築したい場合に指定します。
+
+```yaml
+material:
+  name: "MyMaterial"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+  output:
+    Surface:
+      from: "bsdf.BSDF"
+```
+
+## YAML パーサについて
+
+Blender 同梱 Python では `PyYAML` が使えない環境があるため、`gn_from_yaml_ir.py` の中に小さな YAML パーサを内蔵しています。  
+このパーサは次の記法を対象にしています。
+
+- インデントベースのマッピング
+- シーケンス
+- インライン配列
+- 文字列、数値、真偽値、`null`
+- `|` による複数行文字列
+
+このプロジェクトの IR を扱うには十分ですが、汎用 YAML 実装ではありません。
+
+## サンプル
+
+`yamls/` 配下に、以下のサンプル IR を置いています。
+
+- `Chair.yaml`
+- `CoffeeCap.yaml`
+- `Eraser.yaml`
+- `Pencil.yaml`
+- `PetBottle.yaml`
+- `Table.yaml`
+
+## 冪等性
+
+複数回実行しても結果が安定するよう、次の挙動にしています。
+
+- 既存ノードツリーはクリアして再構築
+- 既存オブジェクトがあれば再利用
+- Geometry Nodes モディファイアは同名のものを再利用
+- Material も同名で再利用
 
 ## 注意点
 
-- Blender のノードソケット名は UI 表示名と内部名が異なることがあります  
-  → IR には「内部ソケット名」を記述してください
-- 「ShaderNodeValue」の default_value は outputs.Value に反映されるため、  
-  Add-on 側で特別処理しています
-
----
+- ソケット名は Blender の内部名を使ってください
+- YAML パーサはこのプロジェクト用の軽量実装です
+- 配布や持ち運びは `gn_from_yaml_ir.py` 単体を前提にしています
+- フォルダ内の列挙対象は `.yaml` / `.yml` ファイルです
 
 ## ライセンス
 
-本アドオンは自由に改変・再利用できます。
-
+自由に改変・再利用できます。

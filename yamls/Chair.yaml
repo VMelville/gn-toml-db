@@ -1,0 +1,319 @@
+info:
+  name: "Chair"
+  thinking: |
+    シンプルな四つ足椅子を、「座面」「4 本の脚」「背もたれ」の 3 要素（計 6 パーツ）で構成して生成する。
+    
+    1. 座面は Mesh Cube + Transform で、Seat size と Seat height から中心位置を決めて配置する。
+    2. 4 本の脚は 1 本の直方体を Cube で作り、座面下に Leg inset 分内側に入れた位置へ 4 回 Transform する。
+    3. 背もたれは座面後縁から立ち上がる直方体として Cube で生成し、Back height / Back thickness と Seat size から位置・サイズを決める。
+    4. 6 つのパーツを Join Geometry でまとめて椅子形状を得る。
+parameter:
+  - name: "Seat size"
+    socket_type: "NodeSocketVector"
+    description: "Size of the seat (X: width, Y: depth, Z: thickness)"
+    subtype: "TRANSLATION"
+    default_value: [0.45, 0.45, 0.04]
+    min_value: 0.0
+  - name: "Seat height"
+    socket_type: "NodeSocketFloat"
+    description: "Height from floor to the top surface of the seat"
+    subtype: "DISTANCE"
+    default_value: 0.45
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg width"
+    socket_type: "NodeSocketFloat"
+    description: "Square cross section width of each leg"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg inset"
+    socket_type: "NodeSocketFloat"
+    description: "Inset distance of legs from the seat corners"
+    subtype: "DISTANCE"
+    default_value: 0.05
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Back height"
+    socket_type: "NodeSocketFloat"
+    description: "Height of the backrest above the seat top"
+    subtype: "DISTANCE"
+    default_value: 0.5
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Back thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the backrest along the depth (Y axis)"
+    subtype: "DISTANCE"
+    default_value: 0.03
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "sep_seat"
+    type: "ShaderNodeSeparateXYZ"
+    inputs:
+      Vector:
+        from: "input.Seat size"
+  - id: "half_seat_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_seat.X"
+      Value_001:
+        value: 0.5
+  - id: "half_seat_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_seat.Y"
+      Value_001:
+        value: 0.5
+  - id: "half_seat_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_seat.Z"
+      Value_001:
+        value: 0.5
+  - id: "seat_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Seat height"
+      Value_001:
+        from: "half_seat_z.Value"
+  - id: "cube_seat"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "input.Seat size"
+  - id: "seat_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "seat_center_z.Value"
+  - id: "xform_seat"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_seat.Mesh"
+      Translation:
+        from: "seat_translate.Vector"
+  - id: "leg_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Seat height"
+      Value_001:
+        from: "sep_seat.Z"
+  - id: "leg_half_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "leg_height.Value"
+      Value_001:
+        value: 0.5
+  - id: "leg_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Leg width"
+      Y:
+        from: "input.Leg width"
+      Z:
+        from: "leg_height.Value"
+  - id: "cube_leg"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "leg_size.Vector"
+  - id: "hx"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_seat_x.Value"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "hy"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_seat_y.Value"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "neg_hx"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "hx.Value"
+      Value_001:
+        value: -1.0
+  - id: "neg_hy"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "hy.Value"
+      Value_001:
+        value: -1.0
+  - id: "leg_pos_pxp_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "hx.Value"
+      Y:
+        from: "hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_pos_pxn_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "hx.Value"
+      Y:
+        from: "neg_hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_pos_nxp_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_hx.Value"
+      Y:
+        from: "hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_pos_nxn_y"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_hx.Value"
+      Y:
+        from: "neg_hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "leg_tr1"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_pxp_y.Vector"
+  - id: "leg_tr2"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_pxn_y.Vector"
+  - id: "leg_tr3"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_nxp_y.Vector"
+  - id: "leg_tr4"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      Translation:
+        from: "leg_pos_nxn_y.Vector"
+  - id: "back_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "sep_seat.X"
+      Y:
+        from: "input.Back thickness"
+      Z:
+        from: "input.Back height"
+  - id: "cube_back"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "back_size.Vector"
+  - id: "half_back_thick"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Back thickness"
+      Value_001:
+        value: 0.5
+  - id: "y_back_center"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_seat_y.Value"
+      Value_001:
+        from: "half_back_thick.Value"
+  - id: "half_back_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Back height"
+      Value_001:
+        value: 0.5
+  - id: "z_back_center"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Seat height"
+      Value_001:
+        from: "half_back_height.Value"
+  - id: "back_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Y:
+        from: "y_back_center.Value"
+      Z:
+        from: "z_back_center.Value"
+  - id: "xform_back"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_back.Mesh"
+      Translation:
+        from: "back_translate.Vector"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "xform_seat.Geometry"
+        - from: "leg_tr1.Geometry"
+        - from: "leg_tr2.Geometry"
+        - from: "leg_tr3.Geometry"
+        - from: "leg_tr4.Geometry"
+        - from: "xform_back.Geometry"
+output:
+  Geometry:
+    from: "join.Geometry"
