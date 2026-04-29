@@ -1,0 +1,35 @@
+info:
+  name: "BoxPart"
+  kind: "node_group"
+  thinking: |
+    直方体を 1 個作り、指定された Translation へ配置する再利用用ノードグループ。
+parameter:
+  - name: "Size"
+    socket_type: "NodeSocketVector"
+    description: "Box size (X, Y, Z)"
+    subtype: "TRANSLATION"
+    default_value: [1.0, 1.0, 1.0]
+  - name: "Translation"
+    socket_type: "NodeSocketVector"
+    description: "Translation applied to the box"
+    subtype: "TRANSLATION"
+    default_value: [0.0, 0.0, 0.0]
+output_socket:
+  - name: "Geometry"
+    socket_type: "NodeSocketGeometry"
+node:
+  - id: "cube"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "input.Size"
+  - id: "xform"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube.Mesh"
+      Translation:
+        from: "input.Translation"
+output:
+  Geometry:
+    from: "xform.Geometry"

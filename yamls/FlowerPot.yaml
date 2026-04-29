@@ -2,6 +2,7 @@ info:
   name: "FlowerPot"
   thinking: |
     植木鉢を、外側のテーパー形状と内側の空洞形状の差分で生成する。
+    中空化の定型処理は HollowPrimitive ノードグループでまとめる。
 
     1. 外側は台形円錐（Mesh Cone）で作り、Pot height と Top/Bottom radius で寸法を決める。
     2. 内側も同じく台形円錐で作るが、半径を Wall thickness 分だけ小さくし、
@@ -89,30 +90,22 @@ node:
         from: "inner_bottom_radius.Value"
       Depth:
         from: "input.Pot height"
-  - id: "xform_inner"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cone_inner.Mesh"
-      Translation:
-        from: "inner_translate.Vector"
-  - id: "bool_pot"
-    type: "GeometryNodeMeshBoolean"
+  - id: "pot_shell"
+    type: "GeometryNodeGroup"
     props:
-      operation: "DIFFERENCE"
+      node_tree: "HollowPrimitive"
     inputs:
-      Mesh:
-        - from: "cone_outer.Mesh"
-        - from: "xform_inner.Geometry"
-      Self Intersection:
-        value: false
-      Hole Tolerant:
-        value: false
+      Outer Geometry:
+        from: "cone_outer.Mesh"
+      Inner Geometry:
+        from: "cone_inner.Mesh"
+      Inner Translation:
+        from: "inner_translate.Vector"
   - id: "set_material"
     type: "GeometryNodeSetMaterial"
     inputs:
       Geometry:
-        from: "bool_pot.Mesh"
+        from: "pot_shell.Geometry"
       Material:
         material: "FlowerPot_Mat"
 output:

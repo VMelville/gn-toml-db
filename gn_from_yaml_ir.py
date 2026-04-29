@@ -11,7 +11,7 @@ from typing import Any
 bl_info = {
     "name": "Geometry & Material from YAML IR",
     "author": "ChatGPT + User",
-    "version": (0, 7, 0),
+    "version": (0, 8, 0),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > YAML IR",
     "description": "Build Geometry Nodes and Material from YAML IR files on disk",
@@ -54,6 +54,12 @@ class _Line:
     indent: int
     raw: str
     text: str
+
+
+@dataclass
+class _BuildContext:
+    ir_cache: dict[Path, dict[str, Any]]
+    active_group_files: set[Path]
 
 
 def loads_yaml_ir(source: str) -> Any:
@@ -941,6 +947,218 @@ def _resolve_directory_path(directory_path: str) -> Path:
     return Path(path_text).expanduser()
 
 
+def _normalize_ir_kind(kind: Any) -> str:
+    text = str(kind or "object").strip().lower()
+    if text in {"group", "node_group", "geometry_node_group"}:
+        return "node_group"
+    return "object"
+
+
+def _get_ir_kind(ir: dict[str, Any]) -> str:
+    info = ir.get("info", {})
+    if not isinstance(info, dict):
+        return "object"
+    return _normalize_ir_kind(info.get("kind"))
+
+
+def _get_output_socket_specs(ir: dict[str, Any]) -> list[dict[str, Any]]:
+    specs = ir.get("output_socket")
+    if specs is None:
+        return [{"name": "Geometry", "socket_type": "NodeSocketGeometry"}]
+    if not isinstance(specs, list):
+        raise ValueError("YAML IR 'output_socket' must be a sequence")
+    return specs
+
+
+def _apply_interface_socket_options(socket: Any, spec: dict[str, Any], in_out: str):
+    if "subtype" in spec:
+        try:
+            socket.subtype = spec["subtype"]
+        except Exception:
+            pass
+
+    if in_out != "INPUT":
+        return
+
+    if "default_value" in spec:
+        try:
+            socket.default_value = spec["default_value"]
+        except Exception:
+            pass
+    if isinstance(spec.get("min_value"), (int, float)):
+        try:
+            socket.min_value = spec["min_value"]
+        except Exception:
+            pass
+    if isinstance(spec.get("max_value"), (int, float)):
+        try:
+            socket.max_value = spec["max_value"]
+        except Exception:
+            pass
+
+
+def _ensure_node_group_interface(node_group: Any, ir: dict[str, Any]):
+    iface = node_group.interface
+    for item in list(iface.items_tree):
+        iface.remove(item)
+
+    params = ir.get("parameter", [])
+    if not isinstance(params, list):
+        raise ValueError("YAML IR 'parameter' must be a sequence")
+
+    for p in params:
+        if not isinstance(p, dict):
+            raise ValueError("Each parameter entry must be a mapping")
+        socket_type = p.get("socket_type")
+        name = p.get("name")
+        if not isinstance(socket_type, str) or not socket_type:
+            raise ValueError("Parameter entry is missing socket_type")
+        if not isinstance(name, str) or not name:
+            raise ValueError("Parameter entry is missing name")
+        socket = iface.new_socket(
+            name=name,
+            in_out="INPUT",
+            socket_type=socket_type,
+            description=p.get("description", ""),
+        )
+        _apply_interface_socket_options(socket, p, in_out="INPUT")
+
+    for spec in _get_output_socket_specs(ir):
+        if not isinstance(spec, dict):
+            raise ValueError("Each output_socket entry must be a mapping")
+        socket_type = spec.get("socket_type")
+        name = spec.get("name")
+        if not isinstance(socket_type, str) or not socket_type:
+            raise ValueError("output_socket entry is missing socket_type")
+        if not isinstance(name, str) or not name:
+            raise ValueError("output_socket entry is missing name")
+        socket = iface.new_socket(
+            name=name,
+            in_out="OUTPUT",
+            socket_type=socket_type,
+            description=spec.get("description", ""),
+        )
+        _apply_interface_socket_options(socket, spec, in_out="OUTPUT")
+
+
+def _make_build_context(context: _BuildContext | None = None) -> _BuildContext:
+    if context is not None:
+        return context
+    return _BuildContext(ir_cache={}, active_group_files=set())
+
+
+def _load_ir_from_file_cached(file_path: str | Path, context: _BuildContext) -> dict[str, Any]:
+    resolved = Path(file_path).resolve()
+    cached = context.ir_cache.get(resolved)
+    if cached is not None:
+        return cached
+    ir = load_ir_from_file(resolved)
+    context.ir_cache[resolved] = ir
+    return ir
+
+
+def _looks_like_yaml_path(text: str) -> bool:
+    stripped = text.strip()
+    lowered = stripped.lower()
+    return (
+        lowered.endswith(".yaml")
+        or lowered.endswith(".yml")
+        or "/" in stripped
+        or "\\" in stripped
+    )
+
+
+def _iter_group_search_roots(source_file: Path | None) -> list[Path]:
+    if source_file is None:
+        return []
+
+    source_dir = source_file.parent.resolve()
+    roots: list[Path] = []
+
+    def add_root(path: Path):
+        resolved = path.resolve()
+        if resolved.is_dir() and resolved not in roots:
+            roots.append(resolved)
+
+    add_root(source_dir)
+    add_root(source_dir / "groups")
+    if source_dir.name == "groups":
+        add_root(source_dir.parent)
+    return roots
+
+
+def _find_group_yaml_by_name(group_name: str, source_file: Path | None, context: _BuildContext) -> Path | None:
+    roots = _iter_group_search_roots(source_file)
+    normalized = group_name.strip().lower()
+
+    direct_candidates: list[Path] = []
+    for root in roots:
+        for suffix in (".yaml", ".yml"):
+            candidate = (root / f"{group_name}{suffix}").resolve()
+            if candidate.is_file() and candidate not in direct_candidates:
+                direct_candidates.append(candidate)
+
+    valid_direct: list[Path] = []
+    for candidate in direct_candidates:
+        ir = _load_ir_from_file_cached(candidate, context)
+        info = ir.get("info", {})
+        if _get_ir_kind(ir) == "node_group" and str(info.get("name", "")).strip().lower() == normalized:
+            valid_direct.append(candidate)
+    if len(valid_direct) == 1:
+        return valid_direct[0]
+    if len(valid_direct) > 1:
+        raise ValueError(f"Multiple node group YAML files found for '{group_name}'")
+
+    matches: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for pattern in ("*.yaml", "*.yml"):
+            for path in root.rglob(pattern):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                ir = _load_ir_from_file_cached(resolved, context)
+                info = ir.get("info", {})
+                if _get_ir_kind(ir) != "node_group":
+                    continue
+                if str(info.get("name", "")).strip().lower() == normalized:
+                    matches.append(resolved)
+
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise ValueError(f"Multiple node group YAML files found for '{group_name}'")
+    return matches[0]
+
+
+def _resolve_group_yaml_path(node_tree_ref: str, source_file: Path | None, context: _BuildContext) -> Path:
+    ref = node_tree_ref.strip()
+    if not ref:
+        raise ValueError("Node group reference is empty")
+
+    if _looks_like_yaml_path(ref):
+        candidates: list[Path] = []
+        raw_path = Path(ref).expanduser()
+        if raw_path.is_absolute():
+            candidates.append(raw_path)
+        else:
+            if source_file is not None:
+                candidates.append((source_file.parent / raw_path).resolve())
+            candidates.append(raw_path.resolve())
+
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+
+        raise FileNotFoundError(f"Node group YAML not found: {ref}")
+
+    found = _find_group_yaml_by_name(ref, source_file, context)
+    if found is None:
+        raise FileNotFoundError(f"Node group YAML not found for '{ref}'")
+    return found
+
+
 def list_yaml_files(directory_path: str) -> list[Path]:
     directory = _resolve_directory_path(directory_path)
     if not directory_path or not directory.is_dir():
@@ -998,42 +1216,81 @@ def load_ir_from_file(file_path: str | Path) -> dict[str, Any]:
 # Geometry Nodes Builder
 # ============================================================
 
-def build_geometry_nodes_from_ir(ir: dict[str, Any]):
+def _resolve_geometry_node_tree_reference(
+    node_tree_ref: str,
+    source_file: Path | None,
+    context: _BuildContext,
+):
     _require_bpy()
 
-    info = ir["info"]
-    gn_name = info["name"]
+    ref = node_tree_ref.strip()
+    if not ref:
+        raise ValueError("Node group reference is empty")
+
+    if not _looks_like_yaml_path(ref):
+        existing = bpy.data.node_groups.get(ref)
+        if existing is not None:
+            return existing
+
+    group_file = _resolve_group_yaml_path(ref, source_file, context)
+    ir = _load_ir_from_file_cached(group_file, context)
+    if _get_ir_kind(ir) != "node_group":
+        raise ValueError(f"Referenced YAML is not a node group: {group_file}")
+
+    info = ir.get("info", {})
+    group_name = info.get("name")
+    if not isinstance(group_name, str) or not group_name:
+        raise ValueError(f"Node group YAML has invalid info.name: {group_file}")
+
+    existing = bpy.data.node_groups.get(group_name)
+    if existing is not None:
+        return existing
+
+    if group_file in context.active_group_files:
+        raise ValueError(f"Cyclic node group dependency detected: {group_file}")
+
+    context.active_group_files.add(group_file)
+    try:
+        node_group, _obj = build_geometry_nodes_from_ir(
+            ir,
+            source_file=group_file,
+            context=context,
+        )
+        return node_group
+    finally:
+        context.active_group_files.remove(group_file)
+
+
+def build_geometry_nodes_from_ir(
+    ir: dict[str, Any],
+    *,
+    source_file: str | Path | None = None,
+    context: _BuildContext | None = None,
+):
+    _require_bpy()
+    context = _make_build_context(context)
+    source_path = Path(source_file).resolve() if source_file is not None else None
+
+    info = ir.get("info", {})
+    if not isinstance(info, dict):
+        raise ValueError("YAML IR 'info' must be a mapping")
+
+    gn_name = info.get("name")
+    if not isinstance(gn_name, str) or not gn_name:
+        raise ValueError("YAML IR info.name must be a non-empty string")
+
+    ir_kind = _get_ir_kind(ir)
 
     node_group = bpy.data.node_groups.get(gn_name)
     if node_group is None:
         node_group = bpy.data.node_groups.new(gn_name, "GeometryNodeTree")
 
-    iface = node_group.interface
-    for item in list(iface.items_tree):
-        iface.remove(item)
+    try:
+        node_group.is_modifier = ir_kind != "node_group"
+    except Exception:
+        pass
 
-    params = ir.get("parameter", [])
-    for p in params:
-        s = iface.new_socket(
-            name=p["name"],
-            in_out="INPUT",
-            socket_type=p["socket_type"],
-            description=p.get("description", ""),
-        )
-        if "subtype" in p:
-            s.subtype = p["subtype"]
-        if "default_value" in p:
-            s.default_value = p["default_value"]
-        if isinstance(p.get("min_value"), (int, float)):
-            s.min_value = p["min_value"]
-        if isinstance(p.get("max_value"), (int, float)):
-            s.max_value = p["max_value"]
-
-    iface.new_socket(
-        name="Geometry",
-        in_out="OUTPUT",
-        socket_type="NodeSocketGeometry",
-    )
+    _ensure_node_group_interface(node_group, ir)
 
     nodes = node_group.nodes
     links = node_group.links
@@ -1057,7 +1314,9 @@ def build_geometry_nodes_from_ir(ir: dict[str, Any]):
         node = node_map[nid]
 
         for k, v in nd.get("props", {}).items():
-            if node.bl_idname == "GeometryNodeSetMaterial" and k == "material" and isinstance(v, str):
+            if k == "node_tree" and isinstance(v, str):
+                node.node_tree = _resolve_geometry_node_tree_reference(v, source_path, context)
+            elif node.bl_idname == "GeometryNodeSetMaterial" and k == "material" and isinstance(v, str):
                 mat = bpy.data.materials.get(v)
                 if mat is None:
                     print(f"[YAML-IR] WARNING: material '{v}' not found for SetMaterial node '{nid}' (props)")
@@ -1154,10 +1413,13 @@ def build_geometry_nodes_from_ir(ir: dict[str, Any]):
     output_spec = ir.get("output", {})
     for socket_name, spec in output_spec.items():
         src = resolve_output_socket(spec["from"])
-        dst = n_out.inputs[socket_name]
+        dst = _get_socket(n_out.inputs, socket_name, "GroupOutput inputs")
         links.new(src, dst)
 
     _apply_geometry_node_layout(ir.get("node", []), output_spec, node_map, n_in, n_out)
+
+    if ir_kind == "node_group":
+        return node_group, None
 
     obj = bpy.data.objects.get(gn_name)
     if obj is None:
@@ -1289,9 +1551,19 @@ def build_from_file(directory_path: str, file_name: str):
     """YAML ファイルを指定して Geometry & Material を構築."""
     _require_bpy()
 
-    ir = load_ir_from_file(resolve_yaml_file_path(directory_path, file_name))
-    mat = build_material_from_ir(ir)
-    node_group, obj = build_geometry_nodes_from_ir(ir)
+    file_path = resolve_yaml_file_path(directory_path, file_name)
+    ir = load_ir_from_file(file_path)
+    ir_kind = _get_ir_kind(ir)
+
+    mat = None
+    if ir_kind != "node_group":
+        mat = build_material_from_ir(ir)
+
+    node_group, obj = build_geometry_nodes_from_ir(
+        ir,
+        source_file=file_path,
+        context=_make_build_context(),
+    )
 
     if mat is not None and obj is not None and hasattr(obj.data, "materials"):
         if obj.data.materials:
@@ -1359,7 +1631,11 @@ class OBJECT_OT_build_from_yaml(Operator):
 
         self.report(
             {"INFO"},
-            f"Built '{file_path.name}' as NodeGroup '{node_group.name}' and Material '{mat.name if mat else 'None'}'",
+            (
+                f"Built node group '{node_group.name}' from '{file_path.name}'"
+                if obj is None
+                else f"Built '{file_path.name}' as NodeGroup '{node_group.name}' and Material '{mat.name if mat else 'None'}'"
+            ),
         )
         return {"FINISHED"}
 

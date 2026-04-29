@@ -3,6 +3,7 @@ info:
   thinking: |
     シンプルなカラーコーンを、「四角いベース」と「上に載る台形円錐」の
     2 パーツで構成して生成する。
+    ベース直方体の生成と配置は BoxPart ノードグループでまとめる。
 
     1. ベースは Mesh Cube を使い、Base width と Base thickness から正方形の板を作る。
     2. コーン本体は Mesh Cone を使い、Top radius / Bottom radius / Cone height で
@@ -74,11 +75,15 @@ node:
     inputs:
       Z:
         from: "input.Base thickness"
-  - id: "cube_base"
-    type: "GeometryNodeMeshCube"
+  - id: "base"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
     inputs:
       Size:
         from: "base_size.Vector"
+      Translation:
+        from: "base_translate.Vector"
   - id: "cone_body"
     type: "GeometryNodeMeshCone"
     props:
@@ -92,13 +97,6 @@ node:
         from: "input.Bottom radius"
       Depth:
         from: "input.Cone height"
-  - id: "xform_base"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_base.Mesh"
-      Translation:
-        from: "base_translate.Vector"
   - id: "xform_cone"
     type: "GeometryNodeTransform"
     inputs:
@@ -110,7 +108,7 @@ node:
     type: "GeometryNodeJoinGeometry"
     inputs:
       Geometry:
-        - from: "xform_base.Geometry"
+        - from: "base.Geometry"
         - from: "xform_cone.Geometry"
   - id: "set_material"
     type: "GeometryNodeSetMaterial"

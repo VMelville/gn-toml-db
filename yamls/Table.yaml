@@ -3,6 +3,8 @@ info:
   thinking: |
     四つ足のシンプルな机を、「天板」と「4本の脚」の5パーツから構成して生成する。
     さらに、Join した後に UVPackIslands により UV 展開し、Material を 1 つ適用する。
+    天板の直方体生成は BoxPart ノードグループ、脚の4隅配置は
+    PlaceFourCorners ノードグループを使う。
     
     UV 展開方針:
     - 机の全パーツは MeshCube による直方体なので、UV 展開は UVPackIslands で十分である。
@@ -64,21 +66,18 @@ node:
         from: "input.Table height"
       Value_001:
         from: "half_top_z.Value"
-  - id: "cube_top"
-    type: "GeometryNodeMeshCube"
-    inputs:
-      Size:
-        from: "input.Top size"
   - id: "top_translate"
     type: "ShaderNodeCombineXYZ"
     inputs:
       Z:
         from: "top_center_z.Value"
-  - id: "xform_top"
-    type: "GeometryNodeTransform"
+  - id: "top"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
     inputs:
-      Geometry:
-        from: "cube_top.Mesh"
+      Size:
+        from: "input.Top size"
       Translation:
         from: "top_translate.Vector"
   - id: "leg_height"
@@ -149,97 +148,25 @@ node:
         from: "half_top_y.Value"
       Value_001:
         from: "input.Leg inset"
-  - id: "neg_hx"
-    type: "ShaderNodeMath"
+  - id: "legs"
+    type: "GeometryNodeGroup"
     props:
-      operation: "MULTIPLY"
+      node_tree: "PlaceFourCorners"
     inputs:
-      Value:
-        from: "hx.Value"
-      Value_001:
-        value: -1.0
-  - id: "neg_hy"
-    type: "ShaderNodeMath"
-    props:
-      operation: "MULTIPLY"
-    inputs:
-      Value:
-        from: "hy.Value"
-      Value_001:
-        value: -1.0
-  - id: "leg_pos_pxp_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
       X:
         from: "hx.Value"
       Y:
         from: "hy.Value"
       Z:
         from: "leg_half_z.Value"
-  - id: "leg_pos_pxn_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      X:
-        from: "hx.Value"
-      Y:
-        from: "neg_hy.Value"
-      Z:
-        from: "leg_half_z.Value"
-  - id: "leg_pos_nxp_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      X:
-        from: "neg_hx.Value"
-      Y:
-        from: "hy.Value"
-      Z:
-        from: "leg_half_z.Value"
-  - id: "leg_pos_nxn_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      X:
-        from: "neg_hx.Value"
-      Y:
-        from: "neg_hy.Value"
-      Z:
-        from: "leg_half_z.Value"
-  - id: "leg_tr1"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_pxp_y.Vector"
-  - id: "leg_tr2"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_pxn_y.Vector"
-  - id: "leg_tr3"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_nxp_y.Vector"
-  - id: "leg_tr4"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_nxn_y.Vector"
   - id: "join"
     type: "GeometryNodeJoinGeometry"
     inputs:
       Geometry:
-        - from: "xform_top.Geometry"
-        - from: "leg_tr1.Geometry"
-        - from: "leg_tr2.Geometry"
-        - from: "leg_tr3.Geometry"
-        - from: "leg_tr4.Geometry"
+        - from: "top.Geometry"
+        - from: "legs.Geometry"
   - id: "uv_pack"
     type: "GeometryNodeUVPackIslands"
     inputs:

@@ -2,6 +2,7 @@ info:
   name: "Chair"
   thinking: |
     シンプルな四つ足椅子を、「座面」「4 本の脚」「背もたれ」の 3 要素（計 6 パーツ）で構成して生成する。
+    脚の4隅配置には PlaceFourCorners ノードグループを使う。
     
     1. 座面は Mesh Cube + Transform で、Seat size と Seat height から中心位置を決めて配置する。
     2. 4 本の脚は 1 本の直方体を Cube で作り、座面下に Leg inset 分内側に入れた位置へ 4 回 Transform する。
@@ -158,88 +159,19 @@ node:
         from: "half_seat_y.Value"
       Value_001:
         from: "input.Leg inset"
-  - id: "neg_hx"
-    type: "ShaderNodeMath"
+  - id: "legs"
+    type: "GeometryNodeGroup"
     props:
-      operation: "MULTIPLY"
+      node_tree: "PlaceFourCorners"
     inputs:
-      Value:
-        from: "hx.Value"
-      Value_001:
-        value: -1.0
-  - id: "neg_hy"
-    type: "ShaderNodeMath"
-    props:
-      operation: "MULTIPLY"
-    inputs:
-      Value:
-        from: "hy.Value"
-      Value_001:
-        value: -1.0
-  - id: "leg_pos_pxp_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
       X:
         from: "hx.Value"
       Y:
         from: "hy.Value"
       Z:
         from: "leg_half_z.Value"
-  - id: "leg_pos_pxn_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      X:
-        from: "hx.Value"
-      Y:
-        from: "neg_hy.Value"
-      Z:
-        from: "leg_half_z.Value"
-  - id: "leg_pos_nxp_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      X:
-        from: "neg_hx.Value"
-      Y:
-        from: "hy.Value"
-      Z:
-        from: "leg_half_z.Value"
-  - id: "leg_pos_nxn_y"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      X:
-        from: "neg_hx.Value"
-      Y:
-        from: "neg_hy.Value"
-      Z:
-        from: "leg_half_z.Value"
-  - id: "leg_tr1"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_pxp_y.Vector"
-  - id: "leg_tr2"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_pxn_y.Vector"
-  - id: "leg_tr3"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_nxp_y.Vector"
-  - id: "leg_tr4"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cube_leg.Mesh"
-      Translation:
-        from: "leg_pos_nxn_y.Vector"
   - id: "back_size"
     type: "ShaderNodeCombineXYZ"
     inputs:
@@ -309,10 +241,7 @@ node:
     inputs:
       Geometry:
         - from: "xform_seat.Geometry"
-        - from: "leg_tr1.Geometry"
-        - from: "leg_tr2.Geometry"
-        - from: "leg_tr3.Geometry"
-        - from: "leg_tr4.Geometry"
+        - from: "legs.Geometry"
         - from: "xform_back.Geometry"
 output:
   Geometry:

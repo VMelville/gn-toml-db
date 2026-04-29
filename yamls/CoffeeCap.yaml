@@ -3,6 +3,7 @@ info:
   thinking: |
     シンプルなコーヒーカップを、「カップ本体（中空の円柱）」と
     「ベジェセグメント＋矩形断面で作るハンドル」の 2 要素で構成する。
+    カップ本体の中空化は HollowPrimitive ノードグループでまとめる。
     
     - Cup radius は「肉厚の中心半径」
         外側半径 = Cup radius + Thickness/2
@@ -71,15 +72,6 @@ node:
         from: "input.Cup radius"
       Value_001:
         from: "thickness_half.Value"
-  - id: "cyl_outer"
-    type: "GeometryNodeMeshCylinder"
-    inputs:
-      Radius:
-        from: "radius_outer.Value"
-      Depth:
-        from: "input.Cup height"
-      Vertices:
-        value: 64
   - id: "outer_half_h"
     type: "ShaderNodeMath"
     props:
@@ -94,6 +86,15 @@ node:
     inputs:
       Z:
         from: "outer_half_h.Value"
+  - id: "cyl_outer"
+    type: "GeometryNodeMeshCylinder"
+    inputs:
+      Radius:
+        from: "radius_outer.Value"
+      Depth:
+        from: "input.Cup height"
+      Vertices:
+        value: 64
   - id: "xform_outer"
     type: "GeometryNodeTransform"
     inputs:
@@ -146,6 +147,11 @@ node:
         from: "input.Thickness"
       Value_001:
         from: "internal_half_h.Value"
+  - id: "inner_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "inner_center_z.Value"
   - id: "cyl_inner"
     type: "GeometryNodeMeshCylinder"
     inputs:
@@ -155,30 +161,17 @@ node:
         from: "internal_height.Value"
       Vertices:
         value: 64
-  - id: "inner_translate"
-    type: "ShaderNodeCombineXYZ"
-    inputs:
-      Z:
-        from: "inner_center_z.Value"
-  - id: "xform_inner"
-    type: "GeometryNodeTransform"
-    inputs:
-      Geometry:
-        from: "cyl_inner.Mesh"
-      Translation:
-        from: "inner_translate.Vector"
-  - id: "bool_cup"
-    type: "GeometryNodeMeshBoolean"
+  - id: "cup_body"
+    type: "GeometryNodeGroup"
     props:
-      operation: "DIFFERENCE"
+      node_tree: "HollowPrimitive"
     inputs:
-      Mesh:
-        - from: "xform_outer.Geometry"
-        - from: "xform_inner.Geometry"
-      Self Intersection:
-        value: false
-      Hole Tolerant:
-        value: false
+      Outer Geometry:
+        from: "xform_outer.Geometry"
+      Inner Geometry:
+        from: "cyl_inner.Mesh"
+      Inner Translation:
+        from: "inner_translate.Vector"
   - id: "handle_half_height"
     type: "ShaderNodeMath"
     props:
@@ -285,7 +278,7 @@ node:
     type: "GeometryNodeJoinGeometry"
     inputs:
       Geometry:
-        - from: "bool_cup.Mesh"
+        - from: "cup_body.Geometry"
         - from: "handle_mesh.Mesh"
 output:
   Geometry:

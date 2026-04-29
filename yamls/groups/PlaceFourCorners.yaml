@@ -1,0 +1,125 @@
+info:
+  name: "PlaceFourCorners"
+  kind: "node_group"
+  thinking: |
+    入力 Geometry を (+X,+Y), (+X,-Y), (-X,+Y), (-X,-Y) の4か所へ配置する再利用用ノードグループ。
+parameter:
+  - name: "Geometry"
+    socket_type: "NodeSocketGeometry"
+    description: "Geometry to duplicate to four corners"
+  - name: "X"
+    socket_type: "NodeSocketFloat"
+    description: "Positive X offset"
+    subtype: "DISTANCE"
+    default_value: 0.5
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Y"
+    socket_type: "NodeSocketFloat"
+    description: "Positive Y offset"
+    subtype: "DISTANCE"
+    default_value: 0.5
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Z"
+    socket_type: "NodeSocketFloat"
+    description: "Shared Z offset"
+    subtype: "DISTANCE"
+    default_value: 0.0
+output_socket:
+  - name: "Geometry"
+    socket_type: "NodeSocketGeometry"
+node:
+  - id: "neg_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.X"
+      Value_001:
+        value: -1.0
+  - id: "neg_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Y"
+      Value_001:
+        value: -1.0
+  - id: "pos_pp"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.X"
+      Y:
+        from: "input.Y"
+      Z:
+        from: "input.Z"
+  - id: "pos_pn"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.X"
+      Y:
+        from: "neg_y.Value"
+      Z:
+        from: "input.Z"
+  - id: "pos_np"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_x.Value"
+      Y:
+        from: "input.Y"
+      Z:
+        from: "input.Z"
+  - id: "pos_nn"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_x.Value"
+      Y:
+        from: "neg_y.Value"
+      Z:
+        from: "input.Z"
+  - id: "tr_pp"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "input.Geometry"
+      Translation:
+        from: "pos_pp.Vector"
+  - id: "tr_pn"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "input.Geometry"
+      Translation:
+        from: "pos_pn.Vector"
+  - id: "tr_np"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "input.Geometry"
+      Translation:
+        from: "pos_np.Vector"
+  - id: "tr_nn"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "input.Geometry"
+      Translation:
+        from: "pos_nn.Vector"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "tr_pp.Geometry"
+        - from: "tr_pn.Geometry"
+        - from: "tr_np.Geometry"
+        - from: "tr_nn.Geometry"
+output:
+  Geometry:
+    from: "join.Geometry"

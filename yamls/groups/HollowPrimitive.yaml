@@ -1,0 +1,40 @@
+info:
+  name: "HollowPrimitive"
+  kind: "node_group"
+  thinking: |
+    外側 Geometry と内側 Geometry の差分を取り、中空形状を作る再利用用ノードグループ。
+    Inner Translation を内部で適用してから Mesh Boolean(DIFFERENCE) を行う。
+parameter:
+  - name: "Outer Geometry"
+    socket_type: "NodeSocketGeometry"
+    description: "Outer shell geometry"
+  - name: "Inner Geometry"
+    socket_type: "NodeSocketGeometry"
+    description: "Inner subtractive geometry before translation"
+  - name: "Inner Translation"
+    socket_type: "NodeSocketVector"
+    description: "Translation applied to the inner geometry"
+    subtype: "TRANSLATION"
+    default_value: [0.0, 0.0, 0.0]
+output_socket:
+  - name: "Geometry"
+    socket_type: "NodeSocketGeometry"
+node:
+  - id: "xform_inner"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "input.Inner Geometry"
+      Translation:
+        from: "input.Inner Translation"
+  - id: "bool_shell"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "DIFFERENCE"
+    inputs:
+      Mesh:
+        - from: "input.Outer Geometry"
+        - from: "xform_inner.Geometry"
+output:
+  Geometry:
+    from: "bool_shell.Mesh"
