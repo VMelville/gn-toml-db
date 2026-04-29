@@ -1,0 +1,136 @@
+info:
+  name: "TrashCan"
+  thinking: |
+    シンプルな丸型のゴミ箱を、外側の円柱と内側の差分円柱で中空化して生成する。
+    中空化の定型処理は HollowPrimitive ノードグループを使う。
+
+    1. 外側円柱は Can height と Outer radius で作り、床に接するように半高さだけ上へ移動する。
+    2. 内側円柱は半径を Wall thickness 分だけ小さくし、高さは外側と同じにする。
+    3. 内側円柱は Wall thickness 分だけ上に持ち上げ、底板厚みを確保しつつ
+       上端側では少し突き抜ける状態で差分する。
+    4. 最後に単一の樹脂風マテリアルを適用する。
+parameter:
+  - name: "Can height"
+    socket_type: "NodeSocketFloat"
+    description: "Overall height of the trash can"
+    subtype: "DISTANCE"
+    default_value: 0.38
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Outer radius"
+    socket_type: "NodeSocketFloat"
+    description: "Outer radius of the trash can"
+    subtype: "DISTANCE"
+    default_value: 0.16
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Wall thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the wall and bottom"
+    subtype: "DISTANCE"
+    default_value: 0.01
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "half_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Can height"
+      Value_001:
+        value: 0.5
+  - id: "outer_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "half_height.Value"
+  - id: "inner_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Outer radius"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "half_height.Value"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "inner_center_z.Value"
+  - id: "cyl_outer"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "input.Outer radius"
+      Depth:
+        from: "input.Can height"
+      Vertices:
+        value: 64
+  - id: "xform_outer"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cyl_outer.Mesh"
+      Translation:
+        from: "outer_translate.Vector"
+  - id: "cyl_inner"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "inner_radius.Value"
+      Depth:
+        from: "input.Can height"
+      Vertices:
+        value: 64
+  - id: "can_shell"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "HollowPrimitive"
+    inputs:
+      Outer Geometry:
+        from: "xform_outer.Geometry"
+      Inner Geometry:
+        from: "cyl_inner.Mesh"
+      Inner Translation:
+        from: "inner_translate.Vector"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "can_shell.Geometry"
+      Material:
+        material: "TrashCan_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "TrashCan_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.18, 0.22, 0.27, 1.0]
+        Roughness:
+          value: 0.48
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"

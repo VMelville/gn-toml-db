@@ -1,0 +1,191 @@
+info:
+  name: "Stool"
+  thinking: |
+    丸座面のシンプルなスツールを、「円形座面」と「4 本の脚」で構成して生成する。
+    脚の4隅配置には PlaceFourCorners ノードグループを使う。
+
+    1. 座面は円柱で作り、Stool height から上面高さが合うように Z 位置を決める。
+    2. 脚は 1 本分の直方体を作り、丸座面の内側に収まるよう Leg inset と Leg width から
+       X/Y オフセットを計算して4隅へ複製する。
+    3. 最後に単一の木材風マテリアルを適用する。
+parameter:
+  - name: "Seat radius"
+    socket_type: "NodeSocketFloat"
+    description: "Radius of the round seat"
+    subtype: "DISTANCE"
+    default_value: 0.18
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Seat thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the seat"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Stool height"
+    socket_type: "NodeSocketFloat"
+    description: "Height from floor to the top surface of the seat"
+    subtype: "DISTANCE"
+    default_value: 0.46
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg width"
+    socket_type: "NodeSocketFloat"
+    description: "Square cross section width of each leg"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg inset"
+    socket_type: "NodeSocketFloat"
+    description: "Inset distance from the seat edge to the outer side of each leg"
+    subtype: "DISTANCE"
+    default_value: 0.03
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "half_seat_t"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Seat thickness"
+      Value_001:
+        value: 0.5
+  - id: "seat_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Stool height"
+      Value_001:
+        from: "half_seat_t.Value"
+  - id: "seat_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "seat_center_z.Value"
+  - id: "seat_cyl"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "input.Seat radius"
+      Depth:
+        from: "input.Seat thickness"
+      Vertices:
+        value: 48
+  - id: "xform_seat"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "seat_cyl.Mesh"
+      Translation:
+        from: "seat_translate.Vector"
+  - id: "leg_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Stool height"
+      Value_001:
+        from: "input.Seat thickness"
+  - id: "leg_half_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "leg_height.Value"
+      Value_001:
+        value: 0.5
+  - id: "leg_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Leg width"
+      Y:
+        from: "input.Leg width"
+      Z:
+        from: "leg_height.Value"
+  - id: "cube_leg"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "leg_size.Vector"
+  - id: "half_leg_w"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Leg width"
+      Value_001:
+        value: 0.5
+  - id: "leg_offset_raw"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Seat radius"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "leg_offset"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "leg_offset_raw.Value"
+      Value_001:
+        from: "half_leg_w.Value"
+  - id: "legs"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "PlaceFourCorners"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      X:
+        from: "leg_offset.Value"
+      Y:
+        from: "leg_offset.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "xform_seat.Geometry"
+        - from: "legs.Geometry"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "join.Geometry"
+      Material:
+        material: "Stool_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "Stool_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.63, 0.47, 0.29, 1.0]
+        Roughness:
+          value: 0.57
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"

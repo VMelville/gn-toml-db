@@ -249,13 +249,17 @@ Blender 同梱 Python では `PyYAML` が使えない環境があるため、`gn
 
 - `Chair.yaml`
 - `CoffeeCap.yaml`
+- `DeskOrganizer.yaml`
 - `Eraser.yaml`
 - `FlowerPot.yaml`
 - `Pencil.yaml`
 - `PetBottle.yaml`
 - `Bookshelf.yaml`
+- `Bench.yaml`
 - `RepeatZoneProbe.yaml`
+- `Stool.yaml`
 - `Table.yaml`
+- `TrashCan.yaml`
 - `TrafficCone.yaml`
 
 再利用ノードグループの例は `yamls/groups/` に置いています。

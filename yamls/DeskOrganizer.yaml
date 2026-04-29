@@ -1,0 +1,358 @@
+info:
+  name: "DeskOrganizer"
+  thinking: |
+    卓上の小物入れを、「外箱の中空シェル」と「2 枚の仕切り板」で構成して生成する。
+    外箱は BoxPart と HollowPrimitive を使って開口上面のある容器を作り、
+    その中に縦仕切り 1 枚と横仕切り 1 枚を追加して 3 区画に分ける。
+
+    1. 外形 Outer size から外箱を作り、底が床面に接するよう BoxPart で配置する。
+    2. 内側の差分用ボックスは XY を Wall thickness 分だけ縮め、同じ高さで作る。
+       HollowPrimitive の Inner Translation を Wall thickness にすることで、
+       底板厚みを残しつつ上面が開いた容器にする。
+    3. 左側の細い区画は Left compartment width で決め、縦仕切りを 1 枚立てる。
+    4. 右側領域はさらに Front compartment depth で前後に分け、横仕切りを 1 枚追加する。
+    5. 最後に単一のプラスチック風マテリアルを適用する。
+parameter:
+  - name: "Outer size"
+    socket_type: "NodeSocketVector"
+    description: "Overall size of the organizer (X: width, Y: depth, Z: height)"
+    subtype: "TRANSLATION"
+    default_value: [0.30, 0.18, 0.12]
+    min_value: 0.0
+  - name: "Wall thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the outer shell"
+    subtype: "DISTANCE"
+    default_value: 0.008
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Divider thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the inner divider plates"
+    subtype: "DISTANCE"
+    default_value: 0.006
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Left compartment width"
+    socket_type: "NodeSocketFloat"
+    description: "Inner width of the left narrow compartment"
+    subtype: "DISTANCE"
+    default_value: 0.08
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Front compartment depth"
+    socket_type: "NodeSocketFloat"
+    description: "Inner depth of the front-right compartment"
+    subtype: "DISTANCE"
+    default_value: 0.07
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "sep_outer"
+    type: "ShaderNodeSeparateXYZ"
+    inputs:
+      Vector:
+        from: "input.Outer size"
+  - id: "half_outer_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_outer.Z"
+      Value_001:
+        value: 0.5
+  - id: "outer_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "half_outer_z.Value"
+  - id: "double_wall"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Wall thickness"
+      Value_001:
+        value: 2.0
+  - id: "inner_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "sep_outer.X"
+      Value_001:
+        from: "double_wall.Value"
+  - id: "inner_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "sep_outer.Y"
+      Value_001:
+        from: "double_wall.Value"
+  - id: "inner_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "inner_x.Value"
+      Y:
+        from: "inner_y.Value"
+      Z:
+        from: "sep_outer.Z"
+  - id: "inner_lift"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "input.Wall thickness"
+  - id: "outer_box"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
+    inputs:
+      Size:
+        from: "input.Outer size"
+      Translation:
+        from: "outer_translate.Vector"
+  - id: "inner_box"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
+    inputs:
+      Size:
+        from: "inner_size.Vector"
+      Translation:
+        from: "outer_translate.Vector"
+  - id: "shell"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "HollowPrimitive"
+    inputs:
+      Outer Geometry:
+        from: "outer_box.Geometry"
+      Inner Geometry:
+        from: "inner_box.Geometry"
+      Inner Translation:
+        from: "inner_lift.Vector"
+  - id: "divider_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "sep_outer.Z"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "half_divider_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "divider_height.Value"
+      Value_001:
+        value: 0.5
+  - id: "divider_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Wall thickness"
+      Value_001:
+        from: "half_divider_height.Value"
+  - id: "half_inner_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "inner_x.Value"
+      Value_001:
+        value: 0.5
+  - id: "half_inner_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "inner_y.Value"
+      Value_001:
+        value: 0.5
+  - id: "half_divider_thickness"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Divider thickness"
+      Value_001:
+        value: 0.5
+  - id: "left_divider_x_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Left compartment width"
+      Value_001:
+        from: "half_divider_thickness.Value"
+  - id: "left_divider_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "left_divider_x_base.Value"
+      Value_001:
+        from: "half_inner_x.Value"
+  - id: "vertical_divider_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Divider thickness"
+      Y:
+        from: "inner_y.Value"
+      Z:
+        from: "divider_height.Value"
+  - id: "vertical_divider_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "left_divider_x.Value"
+      Z:
+        from: "divider_center_z.Value"
+  - id: "vertical_divider"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
+    inputs:
+      Size:
+        from: "vertical_divider_size.Vector"
+      Translation:
+        from: "vertical_divider_translate.Vector"
+  - id: "right_width_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "inner_x.Value"
+      Value_001:
+        from: "input.Left compartment width"
+  - id: "right_width"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "right_width_base.Value"
+      Value_001:
+        from: "input.Divider thickness"
+  - id: "half_right_width"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "right_width.Value"
+      Value_001:
+        value: 0.5
+  - id: "right_center_x_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "left_divider_x.Value"
+      Value_001:
+        from: "half_divider_thickness.Value"
+  - id: "right_center_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "right_center_x_base.Value"
+      Value_001:
+        from: "half_right_width.Value"
+  - id: "front_divider_y_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Front compartment depth"
+      Value_001:
+        from: "half_divider_thickness.Value"
+  - id: "front_divider_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "front_divider_y_base.Value"
+      Value_001:
+        from: "half_inner_y.Value"
+  - id: "horizontal_divider_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "right_width.Value"
+      Y:
+        from: "input.Divider thickness"
+      Z:
+        from: "divider_height.Value"
+  - id: "horizontal_divider_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "right_center_x.Value"
+      Y:
+        from: "front_divider_y.Value"
+      Z:
+        from: "divider_center_z.Value"
+  - id: "horizontal_divider"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
+    inputs:
+      Size:
+        from: "horizontal_divider_size.Vector"
+      Translation:
+        from: "horizontal_divider_translate.Vector"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "shell.Geometry"
+        - from: "vertical_divider.Geometry"
+        - from: "horizontal_divider.Geometry"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "join.Geometry"
+      Material:
+        material: "DeskOrganizer_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "DeskOrganizer_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.79, 0.83, 0.88, 1.0]
+        Roughness:
+          value: 0.42
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"

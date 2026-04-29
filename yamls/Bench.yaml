@@ -1,0 +1,187 @@
+info:
+  name: "Bench"
+  thinking: |
+    背もたれのないシンプルなベンチを、「座面」と「4 本の脚」で構成して生成する。
+    座面は BoxPart、脚の4隅配置は PlaceFourCorners ノードグループを使う。
+
+    1. 座面は直方体として作り、Bench height から座面中心 Z を計算して配置する。
+    2. 脚は 1 本分の直方体を作り、Leg inset だけ内側へ入れた4隅へ複製する。
+    3. 最後に木材風の単一マテリアルを適用する。
+parameter:
+  - name: "Seat size"
+    socket_type: "NodeSocketVector"
+    description: "Size of the bench seat (X: width, Y: depth, Z: thickness)"
+    subtype: "TRANSLATION"
+    default_value: [1.2, 0.35, 0.05]
+    min_value: 0.0
+  - name: "Bench height"
+    socket_type: "NodeSocketFloat"
+    description: "Height from floor to the top surface of the seat"
+    subtype: "DISTANCE"
+    default_value: 0.46
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg width"
+    socket_type: "NodeSocketFloat"
+    description: "Square cross section width of each leg"
+    subtype: "DISTANCE"
+    default_value: 0.05
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Leg inset"
+    socket_type: "NodeSocketFloat"
+    description: "Inset distance of legs from the seat corners"
+    subtype: "DISTANCE"
+    default_value: 0.08
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "sep_seat"
+    type: "ShaderNodeSeparateXYZ"
+    inputs:
+      Vector:
+        from: "input.Seat size"
+  - id: "half_seat_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_seat.Z"
+      Value_001:
+        value: 0.5
+  - id: "seat_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Bench height"
+      Value_001:
+        from: "half_seat_z.Value"
+  - id: "seat_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "seat_center_z.Value"
+  - id: "seat"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "BoxPart"
+    inputs:
+      Size:
+        from: "input.Seat size"
+      Translation:
+        from: "seat_translate.Vector"
+  - id: "leg_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Bench height"
+      Value_001:
+        from: "sep_seat.Z"
+  - id: "leg_half_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "leg_height.Value"
+      Value_001:
+        value: 0.5
+  - id: "leg_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Leg width"
+      Y:
+        from: "input.Leg width"
+      Z:
+        from: "leg_height.Value"
+  - id: "cube_leg"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "leg_size.Vector"
+  - id: "half_seat_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_seat.X"
+      Value_001:
+        value: 0.5
+  - id: "half_seat_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_seat.Y"
+      Value_001:
+        value: 0.5
+  - id: "hx"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_seat_x.Value"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "hy"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_seat_y.Value"
+      Value_001:
+        from: "input.Leg inset"
+  - id: "legs"
+    type: "GeometryNodeGroup"
+    props:
+      node_tree: "PlaceFourCorners"
+    inputs:
+      Geometry:
+        from: "cube_leg.Mesh"
+      X:
+        from: "hx.Value"
+      Y:
+        from: "hy.Value"
+      Z:
+        from: "leg_half_z.Value"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "seat.Geometry"
+        - from: "legs.Geometry"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "join.Geometry"
+      Material:
+        material: "Bench_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "Bench_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.56, 0.39, 0.22, 1.0]
+        Roughness:
+          value: 0.58
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"
