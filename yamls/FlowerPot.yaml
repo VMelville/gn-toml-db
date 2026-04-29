@@ -1,0 +1,135 @@
+info:
+  name: "FlowerPot"
+  thinking: |
+    植木鉢を、外側のテーパー形状と内側の空洞形状の差分で生成する。
+
+    1. 外側は台形円錐（Mesh Cone）で作り、Pot height と Top/Bottom radius で寸法を決める。
+    2. 内側も同じく台形円錐で作るが、半径を Wall thickness 分だけ小さくし、
+       高さは外側と同じ Pot height にすることで傾きを一致させる。
+    3. 内側メッシュは Wall thickness だけ上に持ち上げ、上端側では外側より少し上へ
+       突き抜ける状態で Mesh Boolean(DIFFERENCE) を行う。
+       これにより、上縁で差分面が同一平面にならないようにする。
+    4. 最後に単一のテラコッタ風マテリアルを適用する。
+parameter:
+  - name: "Pot height"
+    socket_type: "NodeSocketFloat"
+    description: "Overall height of the flower pot"
+    subtype: "DISTANCE"
+    default_value: 0.18
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Top radius"
+    socket_type: "NodeSocketFloat"
+    description: "Outer radius at the top rim"
+    subtype: "DISTANCE"
+    default_value: 0.11
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Bottom radius"
+    socket_type: "NodeSocketFloat"
+    description: "Outer radius at the bottom"
+    subtype: "DISTANCE"
+    default_value: 0.07
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Wall thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the pot wall and bottom"
+    subtype: "DISTANCE"
+    default_value: 0.008
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "inner_top_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Top radius"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_bottom_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Bottom radius"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "input.Wall thickness"
+  - id: "cone_outer"
+    type: "GeometryNodeMeshCone"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Vertices:
+        value: 48
+      Radius Top:
+        from: "input.Top radius"
+      Radius Bottom:
+        from: "input.Bottom radius"
+      Depth:
+        from: "input.Pot height"
+  - id: "cone_inner"
+    type: "GeometryNodeMeshCone"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Vertices:
+        value: 48
+      Radius Top:
+        from: "inner_top_radius.Value"
+      Radius Bottom:
+        from: "inner_bottom_radius.Value"
+      Depth:
+        from: "input.Pot height"
+  - id: "xform_inner"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cone_inner.Mesh"
+      Translation:
+        from: "inner_translate.Vector"
+  - id: "bool_pot"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "DIFFERENCE"
+    inputs:
+      Mesh:
+        - from: "cone_outer.Mesh"
+        - from: "xform_inner.Geometry"
+      Self Intersection:
+        value: false
+      Hole Tolerant:
+        value: false
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "bool_pot.Mesh"
+      Material:
+        material: "FlowerPot_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "FlowerPot_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.73, 0.37, 0.2, 1.0]
+        Roughness:
+          value: 0.8
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"

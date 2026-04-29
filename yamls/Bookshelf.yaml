@@ -1,0 +1,393 @@
+info:
+  name: "Bookshelf"
+  thinking: |
+    オープンタイプの本棚を、「左右の側板」「天板」「底板」「背板」の固定フレームと、
+    可変個数の中棚で構成する。
+
+    1. 全体寸法 Outer size を基準に Separate XYZ で幅・奥行き・高さを取り出す。
+    2. 側板は Board thickness を厚みとする直方体 1 個を作り、左右に複製して配置する。
+    3. 天板・底板は、内幅 = 全幅 - 2 * Board thickness で作る共通の棚板メッシュを使って
+       上下に配置する。
+    4. 背板は内幅と内高を使う薄い直方体として生成し、背面側へオフセットする。
+    5. 中棚は Mesh Line で Z 方向に点列を作り、Instance on Points で共通の棚板を複製する。
+       点間隔は inner_height / (Shelf count + 1) とし、上下の固定板の間へ均等配置する。
+    6. 最後に単一の木材マテリアルを適用する。
+parameter:
+  - name: "Outer size"
+    socket_type: "NodeSocketVector"
+    description: "Overall size of the bookshelf (X: width, Y: depth, Z: height)"
+    subtype: "TRANSLATION"
+    default_value: [0.8, 0.28, 1.6]
+    min_value: 0.0
+  - name: "Board thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the side panels and shelves"
+    subtype: "DISTANCE"
+    default_value: 0.03
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Back thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the rear panel"
+    subtype: "DISTANCE"
+    default_value: 0.008
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Shelf count"
+    socket_type: "NodeSocketInt"
+    description: "Number of adjustable inner shelves"
+    default_value: 3
+    min_value: 0
+    max_value: 12
+node:
+  - id: "sep_outer"
+    type: "ShaderNodeSeparateXYZ"
+    inputs:
+      Vector:
+        from: "input.Outer size"
+  - id: "half_outer_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_outer.X"
+      Value_001:
+        value: 0.5
+  - id: "half_outer_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_outer.Y"
+      Value_001:
+        value: 0.5
+  - id: "half_outer_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "sep_outer.Z"
+      Value_001:
+        value: 0.5
+  - id: "half_board"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Board thickness"
+      Value_001:
+        value: 0.5
+  - id: "half_back"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Back thickness"
+      Value_001:
+        value: 0.5
+  - id: "double_board"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Board thickness"
+      Value_001:
+        value: 2.0
+  - id: "inner_width"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "sep_outer.X"
+      Value_001:
+        from: "double_board.Value"
+  - id: "inner_height"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "sep_outer.Z"
+      Value_001:
+        from: "double_board.Value"
+  - id: "side_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Board thickness"
+      Y:
+        from: "sep_outer.Y"
+      Z:
+        from: "sep_outer.Z"
+  - id: "shelf_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "inner_width.Value"
+      Y:
+        from: "sep_outer.Y"
+      Z:
+        from: "input.Board thickness"
+  - id: "back_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "inner_width.Value"
+      Y:
+        from: "input.Back thickness"
+      Z:
+        from: "inner_height.Value"
+  - id: "side_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_outer_x.Value"
+      Value_001:
+        from: "half_board.Value"
+  - id: "neg_side_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "side_x.Value"
+      Value_001:
+        value: -1.0
+  - id: "bottom_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Board thickness"
+      Value_001:
+        value: 0.5
+  - id: "top_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "sep_outer.Z"
+      Value_001:
+        from: "half_board.Value"
+  - id: "shelf_count_plus_one"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Shelf count"
+      Value_001:
+        value: 1.0
+  - id: "shelf_gap"
+    type: "ShaderNodeMath"
+    props:
+      operation: "DIVIDE"
+    inputs:
+      Value:
+        from: "inner_height.Value"
+      Value_001:
+        from: "shelf_count_plus_one.Value"
+  - id: "shelf_start_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Board thickness"
+      Value_001:
+        from: "shelf_gap.Value"
+  - id: "back_y"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "half_back.Value"
+      Value_001:
+        from: "half_outer_y.Value"
+  - id: "left_side_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "neg_side_x.Value"
+      Z:
+        from: "half_outer_z.Value"
+  - id: "right_side_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "side_x.Value"
+      Z:
+        from: "half_outer_z.Value"
+  - id: "bottom_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "bottom_z.Value"
+  - id: "top_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "top_z.Value"
+  - id: "back_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Y:
+        from: "back_y.Value"
+      Z:
+        from: "half_outer_z.Value"
+  - id: "shelf_start"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "shelf_start_z.Value"
+  - id: "shelf_offset"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "shelf_gap.Value"
+  - id: "shelf_count_for_line"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MAXIMUM"
+    inputs:
+      Value:
+        from: "input.Shelf count"
+      Value_001:
+        value: 1.0
+  - id: "has_shelves"
+    type: "ShaderNodeMath"
+    props:
+      operation: "GREATER_THAN"
+    inputs:
+      Value:
+        from: "input.Shelf count"
+      Value_001:
+        value: 0.0
+  - id: "cube_side"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "side_size.Vector"
+  - id: "cube_shelf"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "shelf_size.Vector"
+  - id: "cube_back"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "back_size.Vector"
+  - id: "xform_left"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_side.Mesh"
+      Translation:
+        from: "left_side_translate.Vector"
+  - id: "xform_right"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_side.Mesh"
+      Translation:
+        from: "right_side_translate.Vector"
+  - id: "xform_bottom"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_shelf.Mesh"
+      Translation:
+        from: "bottom_translate.Vector"
+  - id: "xform_top"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_shelf.Mesh"
+      Translation:
+        from: "top_translate.Vector"
+  - id: "xform_back"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_back.Mesh"
+      Translation:
+        from: "back_translate.Vector"
+  - id: "join_frame"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "xform_left.Geometry"
+        - from: "xform_right.Geometry"
+        - from: "xform_bottom.Geometry"
+        - from: "xform_top.Geometry"
+        - from: "xform_back.Geometry"
+  - id: "mesh_line"
+    type: "GeometryNodeMeshLine"
+    props:
+      mode: "OFFSET"
+      count_mode: "TOTAL"
+    inputs:
+      Count:
+        from: "shelf_count_for_line.Value"
+      Start Location:
+        from: "shelf_start.Vector"
+      Offset:
+        from: "shelf_offset.Vector"
+  - id: "instance_shelves"
+    type: "GeometryNodeInstanceOnPoints"
+    inputs:
+      Points:
+        from: "mesh_line.Mesh"
+      Selection:
+        from: "has_shelves.Value"
+      Instance:
+        from: "cube_shelf.Mesh"
+  - id: "realize_shelves"
+    type: "GeometryNodeRealizeInstances"
+    inputs:
+      Geometry:
+        from: "instance_shelves.Geometry"
+  - id: "join_all"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "join_frame.Geometry"
+        - from: "realize_shelves.Geometry"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "join_all.Geometry"
+      Material:
+        material: "Bookshelf_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "Bookshelf_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.5, 0.35, 0.2, 1.0]
+        Roughness:
+          value: 0.55
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"

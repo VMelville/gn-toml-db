@@ -563,10 +563,91 @@ def _socket_is_geometry(sock: Any) -> bool:
 
 
 def _split_socket_name_index(socket_name: str) -> tuple[str, int | None]:
-    match = re.fullmatch(r"(.+?)\s+(\d+)", socket_name.strip())
-    if match is None:
-        return socket_name, None
-    return match.group(1), int(match.group(2))
+    stripped = socket_name.strip()
+
+    match = re.fullmatch(r"(.+?)\s+(\d+)", stripped)
+    if match is not None:
+        return match.group(1), int(match.group(2))
+
+    # Blender often exposes duplicate socket identifiers as Value_001,
+    # Value_002, ... while the UI label remains just "Value".
+    match = re.fullmatch(r"(.+?)_(\d{3})", stripped)
+    if match is not None:
+        return match.group(1), int(match.group(2)) + 1
+
+    return socket_name, None
+
+
+def _get_socket_templates(node: Any, is_input: bool) -> list[Any]:
+    template_getter = getattr(type(node), "input_template" if is_input else "output_template", None)
+    if template_getter is None:
+        return []
+
+    templates: list[Any] = []
+    index = 0
+    while True:
+        try:
+            template = template_getter(index)
+        except Exception:
+            break
+        if template is None:
+            break
+        templates.append(template)
+        index += 1
+
+    return templates
+
+
+def _get_socket_from_templates(collection: Any, socket_name: str):
+    sockets = list(collection)
+    if not sockets:
+        return None
+
+    owner_node = getattr(sockets[0], "node", None)
+    if owner_node is None:
+        return None
+
+    owner_inputs = list(getattr(owner_node, "inputs", []))
+    owner_outputs = list(getattr(owner_node, "outputs", []))
+
+    is_input = None
+    if len(owner_inputs) == len(sockets) and all(a is b for a, b in zip(owner_inputs, sockets)):
+        is_input = True
+    elif len(owner_outputs) == len(sockets) and all(a is b for a, b in zip(owner_outputs, sockets)):
+        is_input = False
+    else:
+        return None
+
+    templates = _get_socket_templates(owner_node, is_input=is_input)
+    if not templates:
+        return None
+
+    normalized = _normalize_socket_name(socket_name)
+    base_name, ordinal = _split_socket_name_index(socket_name)
+    normalized_base = _normalize_socket_name(base_name)
+
+    def match_template_name(template: Any, expected: str) -> bool:
+        return (
+            _normalize_socket_name(getattr(template, "name", "")) == expected
+            or _normalize_socket_name(getattr(template, "identifier", "")) == expected
+        )
+
+    for index, template in enumerate(templates):
+        if index >= len(sockets):
+            break
+        if match_template_name(template, normalized):
+            return sockets[index]
+
+    if ordinal is not None:
+        matching_indexes = [
+            index
+            for index, template in enumerate(templates[: len(sockets)])
+            if match_template_name(template, normalized_base)
+        ]
+        if 1 <= ordinal <= len(matching_indexes):
+            return sockets[matching_indexes[ordinal - 1]]
+
+    return None
 
 
 def _get_socket(collection: Any, socket_name: str, owner_label: str):
@@ -579,6 +660,17 @@ def _get_socket(collection: Any, socket_name: str, owner_label: str):
 
     normalized = _normalize_socket_name(socket_name)
     sockets = list(collection)
+    owner_node = getattr(sockets[0], "node", None) if sockets else None
+
+    if (
+        normalized == "iterations"
+        and owner_node is not None
+        and getattr(owner_node, "bl_idname", "") == "GeometryNodeRepeatOutput"
+    ):
+        raise KeyError(
+            f"{owner_label}: socket 'Iterations' is not available on Repeat Output. "
+            "Connect 'Iterations' on the Repeat Input node."
+        )
 
     for sock in sockets:
         if _normalize_socket_name(getattr(sock, "name", "")) == normalized:
@@ -591,6 +683,10 @@ def _get_socket(collection: Any, socket_name: str, owner_label: str):
     ]
     if ordinal is not None and 1 <= ordinal <= len(matching_base):
         return matching_base[ordinal - 1]
+
+    templated = _get_socket_from_templates(collection, socket_name)
+    if templated is not None:
+        return templated
 
     if normalized in {"mesh", "geometry"} or normalized_base in {"mesh", "geometry"}:
         geometry_sockets = [sock for sock in sockets if _socket_is_geometry(sock)]
@@ -620,6 +716,218 @@ def _get_input_sockets(collection: Any, socket_name: str, item_count: int, owner
 def _require_bpy():
     if bpy is None:
         raise RuntimeError("This operation requires Blender's Python environment")
+
+
+def _configure_repeat_items(node: Any, items_spec: Any, node_id: str):
+    if not items_spec:
+        return
+
+    repeat_items = getattr(node, "repeat_items", None)
+    if repeat_items is None:
+        raise ValueError(f"Node '{node_id}' does not support repeat_items")
+
+    for item in items_spec:
+        if not isinstance(item, dict):
+            raise ValueError(f"Node '{node_id}' repeat_items must be mappings")
+        socket_type = item.get("socket_type")
+        name = item.get("name")
+        if not isinstance(socket_type, str) or not socket_type:
+            raise ValueError(f"Node '{node_id}' repeat item is missing socket_type")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"Node '{node_id}' repeat item is missing name")
+        repeat_items.new(socket_type, name)
+
+
+def _pair_zone_node(node: Any, output_node: Any, node_id: str, output_id: str):
+    pair_method = getattr(node, "pair_with_output", None)
+    if pair_method is None:
+        raise ValueError(f"Node '{node_id}' does not support zone_pair")
+
+    paired = pair_method(output_node)
+    if paired is False:
+        raise ValueError(f"Failed to pair zone node '{node_id}' with '{output_id}'")
+
+
+def _iter_from_endpoints(spec: Any):
+    if isinstance(spec, list):
+        for item in spec:
+            if isinstance(item, dict) and isinstance(item.get("from"), str):
+                yield item["from"]
+        return
+
+    if isinstance(spec, dict) and isinstance(spec.get("from"), str):
+        yield spec["from"]
+
+
+def _average(values: list[float], default: float = 0.0) -> float:
+    if not values:
+        return default
+    return sum(values) / len(values)
+
+
+def _extract_dependency_graph(node_specs: list[dict[str, Any]]) -> tuple[dict[str, set[str]], dict[str, int]]:
+    deps_by_node: dict[str, set[str]] = {}
+    order_by_node: dict[str, int] = {}
+
+    for index, nd in enumerate(node_specs):
+        nid = nd["id"]
+        order_by_node[nid] = index
+        deps: set[str] = set()
+
+        for spec in nd.get("inputs", {}).values():
+            for endpoint in _iter_from_endpoints(spec):
+                owner, _sock = endpoint.split(".", 1)
+                deps.add(owner)
+
+        deps_by_node[nid] = deps
+
+    return deps_by_node, order_by_node
+
+
+def _compute_depths(node_ids: list[str], deps_by_node: dict[str, set[str]]) -> dict[str, int]:
+    memo: dict[str, int] = {}
+    visiting: set[str] = set()
+
+    def depth_of(nid: str) -> int:
+        if nid in memo:
+            return memo[nid]
+        if nid in visiting:
+            return 1
+
+        visiting.add(nid)
+        max_dep_depth = 0
+
+        for dep in deps_by_node.get(nid, set()):
+            if dep in {"input", "output"}:
+                continue
+            if dep in deps_by_node:
+                max_dep_depth = max(max_dep_depth, depth_of(dep))
+
+        visiting.remove(nid)
+        memo[nid] = max_dep_depth + 1
+        return memo[nid]
+
+    for nid in node_ids:
+        depth_of(nid)
+
+    return memo
+
+
+def _compute_layout_positions(
+    node_specs: list[dict[str, Any]],
+    output_spec: dict[str, Any],
+    include_group_input: bool,
+    x_spacing: float = 320.0,
+    y_spacing: float = 220.0,
+) -> tuple[dict[str, tuple[float, float]], tuple[float, float] | None, tuple[float, float]]:
+    if not node_specs:
+        input_pos = (-x_spacing, 0.0) if include_group_input else None
+        return {}, input_pos, (x_spacing, 0.0)
+
+    deps_by_node, order_by_node = _extract_dependency_graph(node_specs)
+    node_ids = [nd["id"] for nd in node_specs]
+    depths = _compute_depths(node_ids, deps_by_node)
+
+    layers: dict[int, list[str]] = {}
+    for nid in node_ids:
+        layers.setdefault(depths[nid], []).append(nid)
+
+    positions: dict[str, tuple[float, float]] = {}
+    y_by_node: dict[str, float] = {}
+
+    for depth in sorted(layers):
+        layer_ids = layers[depth]
+
+        def sort_key(nid: str):
+            upstream_y = [y_by_node[dep] for dep in deps_by_node.get(nid, set()) if dep in y_by_node]
+            return (-_average(upstream_y, default=0.0), order_by_node[nid])
+
+        ordered_ids = sorted(layer_ids, key=sort_key)
+        top_y = ((len(ordered_ids) - 1) * y_spacing) / 2.0
+
+        for index, nid in enumerate(ordered_ids):
+            x = depth * x_spacing
+            y = top_y - index * y_spacing
+            positions[nid] = (x, y)
+            y_by_node[nid] = y
+
+    max_depth = max(depths.values())
+
+    output_sources_y: list[float] = []
+    for spec in output_spec.values():
+        for endpoint in _iter_from_endpoints(spec):
+            owner, _sock = endpoint.split(".", 1)
+            if owner in y_by_node:
+                output_sources_y.append(y_by_node[owner])
+    output_pos = ((max_depth + 1) * x_spacing, _average(output_sources_y, default=0.0))
+
+    input_pos = None
+    if include_group_input:
+        input_user_y = [y_by_node[nid] for nid in node_ids if "input" in deps_by_node.get(nid, set())]
+        input_pos = (-x_spacing, _average(input_user_y, default=0.0))
+
+    return positions, input_pos, output_pos
+
+
+def _apply_geometry_node_layout(
+    node_specs: list[dict[str, Any]],
+    output_spec: dict[str, Any],
+    node_map: dict[str, Any],
+    n_in: Any,
+    n_out: Any,
+):
+    positions, input_pos, output_pos = _compute_layout_positions(
+        node_specs,
+        output_spec,
+        include_group_input=True,
+    )
+
+    if input_pos is not None:
+        n_in.location = input_pos
+    n_out.location = output_pos
+
+    for nid, pos in positions.items():
+        node_map[nid].location = pos
+
+
+def _apply_material_node_layout(
+    node_specs: list[dict[str, Any]],
+    output_spec: dict[str, Any],
+    node_map: dict[str, Any],
+    mat_out: Any,
+):
+    positions, _input_pos, output_pos = _compute_layout_positions(
+        node_specs,
+        output_spec,
+        include_group_input=False,
+    )
+
+    mat_out.location = output_pos
+
+    for nid, pos in positions.items():
+        node_map[nid].location = pos
+
+
+def _get_repeat_output_iterations_socket(collection: Any):
+    sockets = list(collection)
+
+    named = [sock for sock in sockets if _normalize_socket_name(getattr(sock, "name", "")) == "iterations"]
+    if named:
+        return named[0]
+
+    typed = [sock for sock in sockets if getattr(sock, "type", "") in {"INT", "VALUE"}]
+    if len(typed) == 1:
+        return typed[0]
+
+    unnamed_typed = [sock for sock in typed if not getattr(sock, "name", "").strip()]
+    if len(unnamed_typed) == 1:
+        return unnamed_typed[0]
+
+    non_geometry = [sock for sock in sockets if not _socket_is_geometry(sock)]
+    if len(non_geometry) == 1:
+        return non_geometry[0]
+
+    return None
 
 
 def _resolve_directory_path(directory_path: str) -> Path:
@@ -732,10 +1040,8 @@ def build_geometry_nodes_from_ir(ir: dict[str, Any]):
     nodes.clear()
 
     n_in = nodes.new("NodeGroupInput")
-    n_in.location = (-2200, 0)
 
     n_out = nodes.new("NodeGroupOutput")
-    n_out.location = (900, 0)
 
     node_map = {}
 
@@ -746,6 +1052,10 @@ def build_geometry_nodes_from_ir(ir: dict[str, Any]):
         node.name = nid
         node_map[nid] = node
 
+    for nd in ir.get("node", []):
+        nid = nd["id"]
+        node = node_map[nid]
+
         for k, v in nd.get("props", {}).items():
             if node.bl_idname == "GeometryNodeSetMaterial" and k == "material" and isinstance(v, str):
                 mat = bpy.data.materials.get(v)
@@ -755,6 +1065,20 @@ def build_geometry_nodes_from_ir(ir: dict[str, Any]):
                     node.material = mat
             else:
                 setattr(node, k, v)
+
+    for nd in ir.get("node", []):
+        nid = nd["id"]
+        node = node_map[nid]
+        _configure_repeat_items(node, nd.get("repeat_items"), nid)
+
+    for nd in ir.get("node", []):
+        nid = nd["id"]
+        pair_target = nd.get("zone_pair")
+        if not isinstance(pair_target, str) or not pair_target:
+            continue
+        if pair_target not in node_map:
+            raise KeyError(f"Node '{nid}': zone_pair target '{pair_target}' not found")
+        _pair_zone_node(node_map[nid], node_map[pair_target], nid, pair_target)
 
     def resolve_output_socket(endpoint: str):
         owner, sock = endpoint.split(".", 1)
@@ -833,6 +1157,8 @@ def build_geometry_nodes_from_ir(ir: dict[str, Any]):
         dst = n_out.inputs[socket_name]
         links.new(src, dst)
 
+    _apply_geometry_node_layout(ir.get("node", []), output_spec, node_map, n_in, n_out)
+
     obj = bpy.data.objects.get(gn_name)
     if obj is None:
         mesh = bpy.data.meshes.new(gn_name + "Mesh")
@@ -880,7 +1206,6 @@ def build_material_from_ir(ir: dict[str, Any]):
 
     mat_out = nodes.new("ShaderNodeOutputMaterial")
     mat_out.name = "MaterialOutput"
-    mat_out.location = (400, 0)
 
     node_map = {"MaterialOutput": mat_out}
 
@@ -950,6 +1275,8 @@ def build_material_from_ir(ir: dict[str, Any]):
         src = resolve_output_socket(spec["from"])
         dst = mat_out.inputs[socket_name]
         links.new(src, dst)
+
+    _apply_material_node_layout(mat_spec.get("node", []), out_spec, node_map, mat_out)
 
     return mat
 

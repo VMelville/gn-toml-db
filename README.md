@@ -132,6 +132,33 @@ node:
         value: 0.015
 ```
 
+### `repeat_items` / `zone_pair`
+
+Repeat Zone のような動的ソケットを持つノードでは、追加ソケット定義とペア情報を
+ノード定義に書けます。
+
+```yaml
+node:
+  - id: "repeat_in"
+    type: "GeometryNodeRepeatInput"
+    zone_pair: "repeat_out"
+    inputs:
+      Iterations:
+        from: "input.Count"
+      Geometry:
+        from: "frame.Geometry"
+
+  - id: "repeat_out"
+    type: "GeometryNodeRepeatOutput"
+    repeat_items:
+      - socket_type: "FLOAT"
+        name: "Offset Z"
+```
+
+- `zone_pair`: `pair_with_output(...)` が必要なゾーン入力ノード用
+- `repeat_items`: `GeometryNodeRepeatOutput.repeat_items.new(socket_type, name)` 相当
+- `Iterations` は `Repeat Input` 側に与えます
+
 ### `output`
 
 Group Output への接続先です。
@@ -179,6 +206,7 @@ Blender 同梱 Python では `PyYAML` が使えない環境があるため、`gn
 - `Eraser.yaml`
 - `Pencil.yaml`
 - `PetBottle.yaml`
+- `RepeatZoneProbe.yaml`
 - `Table.yaml`
 
 ## 冪等性

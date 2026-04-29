@@ -1,0 +1,139 @@
+info:
+  name: "TrafficCone"
+  thinking: |
+    シンプルなカラーコーンを、「四角いベース」と「上に載る台形円錐」の
+    2 パーツで構成して生成する。
+
+    1. ベースは Mesh Cube を使い、Base width と Base thickness から正方形の板を作る。
+    2. コーン本体は Mesh Cone を使い、Top radius / Bottom radius / Cone height で
+       台形円錐として作る。
+    3. ベースを床上に置き、その上面から立ち上がるようにコーン本体を Z 方向へ移動する。
+    4. 2 つのパーツを Join Geometry でまとめ、単一のオレンジ色マテリアルを適用する。
+parameter:
+  - name: "Cone height"
+    socket_type: "NodeSocketFloat"
+    description: "Height of the cone body above the base"
+    subtype: "DISTANCE"
+    default_value: 0.7
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Base width"
+    socket_type: "NodeSocketFloat"
+    description: "Width of the square base"
+    subtype: "DISTANCE"
+    default_value: 0.34
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Base thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the square base"
+    subtype: "DISTANCE"
+    default_value: 0.04
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Top radius"
+    socket_type: "NodeSocketFloat"
+    description: "Radius at the top opening"
+    subtype: "DISTANCE"
+    default_value: 0.03
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Bottom radius"
+    socket_type: "NodeSocketFloat"
+    description: "Radius at the bottom of the cone body"
+    subtype: "DISTANCE"
+    default_value: 0.14
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "base_half_t"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Base thickness"
+      Value_001:
+        value: 0.5
+  - id: "base_size"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "input.Base width"
+      Y:
+        from: "input.Base width"
+      Z:
+        from: "input.Base thickness"
+  - id: "base_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "base_half_t.Value"
+  - id: "cone_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "input.Base thickness"
+  - id: "cube_base"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "base_size.Vector"
+  - id: "cone_body"
+    type: "GeometryNodeMeshCone"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Vertices:
+        value: 48
+      Radius Top:
+        from: "input.Top radius"
+      Radius Bottom:
+        from: "input.Bottom radius"
+      Depth:
+        from: "input.Cone height"
+  - id: "xform_base"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cube_base.Mesh"
+      Translation:
+        from: "base_translate.Vector"
+  - id: "xform_cone"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "cone_body.Mesh"
+      Translation:
+        from: "cone_translate.Vector"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "xform_base.Geometry"
+        - from: "xform_cone.Geometry"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "join.Geometry"
+      Material:
+        material: "TrafficCone_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "TrafficCone_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.95, 0.32, 0.06, 1.0]
+        Roughness:
+          value: 0.65
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"
