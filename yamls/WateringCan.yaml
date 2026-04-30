@@ -1,0 +1,660 @@
+info:
+  name: "WateringCan"
+  thinking: |
+    じょうろを、「外側形状を先に合成し、そのあとで内側空洞をまとめてくり抜く」
+    構成で生成する。これにより、斜めに突き刺さる注ぎ口の根元に
+    不要な内側形状が残らないようにする。
+
+    1. ボディ外形は円柱、注ぎ口外形は 60 度傾けた円柱として作る。
+    2. 注ぎ口の始点は、斜め刺し込み時の投影を考慮して本体へ十分に埋め込む。
+    3. 注ぎ口内側は少し長めの円柱にして、先端カットを考慮せず確実に開口させる。
+    4. ボディ外形と注ぎ口外形を UNION し、ボディ内側と注ぎ口内側を UNION してから
+       最後に DIFFERENCE で中空ボディを作る。
+    5. 注ぎ口先端は、中空化のあとに水平寄りの平面でカットして口元を整える。
+    6. ハンドルはベジェ曲線と矩形断面で作り、始点と終点を本体の壁厚中央へ合わせる。
+parameter:
+  - name: "Body radius"
+    socket_type: "NodeSocketFloat"
+    description: "Outer radius of the main water container"
+    subtype: "DISTANCE"
+    default_value: 0.09
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Body height"
+    socket_type: "NodeSocketFloat"
+    description: "Overall height of the main body"
+    subtype: "DISTANCE"
+    default_value: 0.16
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Wall thickness"
+    socket_type: "NodeSocketFloat"
+    description: "Thickness of the body wall, bottom, and handle section"
+    subtype: "DISTANCE"
+    default_value: 0.005
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Spout length"
+    socket_type: "NodeSocketFloat"
+    description: "Length of the pouring spout"
+    subtype: "DISTANCE"
+    default_value: 0.18
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Spout radius"
+    socket_type: "NodeSocketFloat"
+    description: "Outer radius of the spout tube"
+    subtype: "DISTANCE"
+    default_value: 0.018
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Handle reach"
+    socket_type: "NodeSocketFloat"
+    description: "How far the handle arches away from the body"
+    subtype: "DISTANCE"
+    default_value: 0.08
+    min_value: 0.0
+    max_value: "inf"
+  - name: "Handle width"
+    socket_type: "NodeSocketFloat"
+    description: "Flat width of the handle cross section"
+    subtype: "DISTANCE"
+    default_value: 0.02
+    min_value: 0.0
+    max_value: "inf"
+node:
+  - id: "half_body_h"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Body height"
+      Value_001:
+        value: 0.5
+  - id: "body_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "half_body_h.Value"
+  - id: "inner_body_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Body radius"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_body_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "half_body_h.Value"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_body_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Z:
+        from: "inner_body_center_z.Value"
+  - id: "body_outer"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "input.Body radius"
+      Depth:
+        from: "input.Body height"
+      Vertices:
+        value: 64
+  - id: "xform_body_outer"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "body_outer.Mesh"
+      Translation:
+        from: "body_translate.Vector"
+  - id: "body_inner"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "inner_body_radius.Value"
+      Depth:
+        from: "input.Body height"
+      Vertices:
+        value: 64
+  - id: "xform_body_inner"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "body_inner.Mesh"
+      Translation:
+        from: "inner_body_translate.Vector"
+  - id: "half_spout_len"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Spout length"
+      Value_001:
+        value: 0.5
+  - id: "spout_dx"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "half_spout_len.Value"
+      Value_001:
+        value: 0.8660254
+  - id: "spout_dz"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "half_spout_len.Value"
+      Value_001:
+        value: 0.5
+  - id: "spout_attach_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Body height"
+      Value_001:
+        value: 0.68
+  - id: "half_wall"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Wall thickness"
+      Value_001:
+        value: 0.5
+  - id: "half_spout_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Spout radius"
+      Value_001:
+        value: 0.5
+  - id: "spout_overlap_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "half_spout_radius.Value"
+      Value_001:
+        from: "half_wall.Value"
+  - id: "spout_overlap_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "spout_overlap_x.Value"
+      Value_001:
+        value: 0.5773503
+  - id: "spout_center_x_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Body radius"
+      Value_001:
+        from: "spout_dx.Value"
+  - id: "spout_center_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "spout_center_x_base.Value"
+      Value_001:
+        from: "spout_overlap_x.Value"
+  - id: "spout_center_z_base"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "spout_attach_z.Value"
+      Value_001:
+        from: "spout_dz.Value"
+  - id: "spout_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "spout_center_z_base.Value"
+      Value_001:
+        from: "spout_overlap_z.Value"
+  - id: "spout_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "spout_center_x.Value"
+      Z:
+        from: "spout_center_z.Value"
+  - id: "spout_rotation"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Y:
+        value: 1.0471976
+  - id: "inner_spout_radius"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Spout radius"
+      Value_001:
+        from: "input.Wall thickness"
+  - id: "inner_spout_extra"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Wall thickness"
+      Value_001:
+        value: 2.0
+  - id: "inner_spout_length"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "input.Spout length"
+      Value_001:
+        from: "inner_spout_extra.Value"
+  - id: "spout_outer"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "input.Spout radius"
+      Depth:
+        from: "input.Spout length"
+      Vertices:
+        value: 32
+  - id: "spout_inner"
+    type: "GeometryNodeMeshCylinder"
+    props:
+      fill_type: "NGON"
+    inputs:
+      Radius:
+        from: "inner_spout_radius.Value"
+      Depth:
+        from: "inner_spout_length.Value"
+      Vertices:
+        value: 32
+  - id: "xform_spout_outer"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "spout_outer.Mesh"
+      Translation:
+        from: "spout_translate.Vector"
+      Rotation:
+        from: "spout_rotation.Vector"
+  - id: "xform_spout_inner"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "spout_inner.Mesh"
+      Translation:
+        from: "spout_translate.Vector"
+      Rotation:
+        from: "spout_rotation.Vector"
+  - id: "tip_cut_size"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Spout radius"
+      Value_001:
+        value: 4.0
+  - id: "tip_cut_span_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Spout radius"
+      Value_001:
+        value: 8.0
+  - id: "tip_cut_back"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Spout radius"
+      Value_001:
+        value: 0.8
+  - id: "tip_cut_half_size"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "tip_cut_size.Value"
+      Value_001:
+        value: 0.5
+  - id: "tip_cut_half_span_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "tip_cut_span_x.Value"
+      Value_001:
+        value: 0.5
+  - id: "tip_cut_back_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "tip_cut_back.Value"
+      Value_001:
+        value: 0.8660254
+  - id: "tip_cut_back_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "tip_cut_back.Value"
+      Value_001:
+        value: 0.5
+  - id: "tip_cut_forward_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "tip_cut_half_span_x.Value"
+      Value_001:
+        value: 0.3420201
+  - id: "tip_cut_forward_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "tip_cut_half_span_x.Value"
+      Value_001:
+        value: 0.9396926
+  - id: "spout_tip_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "spout_center_x.Value"
+      Value_001:
+        from: "spout_dx.Value"
+  - id: "spout_tip_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "spout_center_z.Value"
+      Value_001:
+        from: "spout_dz.Value"
+  - id: "tip_cut_plane_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "spout_tip_x.Value"
+      Value_001:
+        from: "tip_cut_back_x.Value"
+  - id: "tip_cut_plane_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "spout_tip_z.Value"
+      Value_001:
+        from: "tip_cut_back_z.Value"
+  - id: "tip_cut_center_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "tip_cut_plane_x.Value"
+      Value_001:
+        from: "tip_cut_forward_x.Value"
+  - id: "tip_cut_center_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "ADD"
+    inputs:
+      Value:
+        from: "tip_cut_plane_z.Value"
+      Value_001:
+        from: "tip_cut_forward_z.Value"
+  - id: "tip_cut_size_vec"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "tip_cut_span_x.Value"
+      Y:
+        from: "tip_cut_size.Value"
+      Z:
+        from: "tip_cut_size.Value"
+  - id: "tip_cut_rotation"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      Y:
+        value: -1.2217305
+  - id: "tip_cut_translate"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "tip_cut_center_x.Value"
+      Z:
+        from: "tip_cut_center_z.Value"
+  - id: "tip_cut_box_raw"
+    type: "GeometryNodeMeshCube"
+    inputs:
+      Size:
+        from: "tip_cut_size_vec.Vector"
+  - id: "tip_cut_box"
+    type: "GeometryNodeTransform"
+    inputs:
+      Geometry:
+        from: "tip_cut_box_raw.Mesh"
+      Translation:
+        from: "tip_cut_translate.Vector"
+      Rotation:
+        from: "tip_cut_rotation.Vector"
+  - id: "outer_with_spout"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "UNION"
+    inputs:
+      Mesh:
+        - from: "xform_body_outer.Geometry"
+        - from: "xform_spout_outer.Geometry"
+  - id: "inner_with_spout"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "UNION"
+    inputs:
+      Mesh:
+        - from: "xform_body_inner.Geometry"
+        - from: "xform_spout_inner.Geometry"
+  - id: "body_shell"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "DIFFERENCE"
+    inputs:
+      Mesh:
+        - from: "outer_with_spout.Mesh"
+        - from: "inner_with_spout.Mesh"
+  - id: "cut_body_shell"
+    type: "GeometryNodeMeshBoolean"
+    props:
+      operation: "DIFFERENCE"
+    inputs:
+      Mesh:
+        - from: "body_shell.Mesh"
+        - from: "tip_cut_box.Geometry"
+  - id: "handle_lower_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Body height"
+      Value_001:
+        value: 0.28
+  - id: "handle_upper_z"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "input.Body height"
+      Value_001:
+        value: 0.92
+  - id: "handle_attach_abs_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "input.Body radius"
+      Value_001:
+        from: "half_wall.Value"
+  - id: "handle_attach_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "MULTIPLY"
+    inputs:
+      Value:
+        from: "handle_attach_abs_x.Value"
+      Value_001:
+        value: -1.0
+  - id: "handle_control_x"
+    type: "ShaderNodeMath"
+    props:
+      operation: "SUBTRACT"
+    inputs:
+      Value:
+        from: "handle_attach_x.Value"
+      Value_001:
+        from: "input.Handle reach"
+  - id: "handle_start"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "handle_attach_x.Value"
+      Z:
+        from: "handle_lower_z.Value"
+  - id: "handle_end"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "handle_attach_x.Value"
+      Z:
+        from: "handle_upper_z.Value"
+  - id: "handle_start_handle"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "handle_control_x.Value"
+      Z:
+        from: "handle_lower_z.Value"
+  - id: "handle_end_handle"
+    type: "ShaderNodeCombineXYZ"
+    inputs:
+      X:
+        from: "handle_control_x.Value"
+      Z:
+        from: "handle_upper_z.Value"
+  - id: "handle_curve"
+    type: "GeometryNodeCurvePrimitiveBezierSegment"
+    props:
+      mode: "POSITION"
+    inputs:
+      Start:
+        from: "handle_start.Vector"
+      End:
+        from: "handle_end.Vector"
+      Start Handle:
+        from: "handle_start_handle.Vector"
+      End Handle:
+        from: "handle_end_handle.Vector"
+  - id: "handle_profile"
+    type: "GeometryNodeCurvePrimitiveQuadrilateral"
+    props:
+      mode: "RECTANGLE"
+    inputs:
+      Width:
+        from: "input.Handle width"
+      Height:
+        from: "input.Wall thickness"
+  - id: "handle_mesh"
+    type: "GeometryNodeCurveToMesh"
+    inputs:
+      Curve:
+        from: "handle_curve.Curve"
+      Profile Curve:
+        from: "handle_profile.Curve"
+  - id: "join"
+    type: "GeometryNodeJoinGeometry"
+    inputs:
+      Geometry:
+        - from: "cut_body_shell.Mesh"
+        - from: "handle_mesh.Mesh"
+  - id: "set_material"
+    type: "GeometryNodeSetMaterial"
+    inputs:
+      Geometry:
+        from: "join.Geometry"
+      Material:
+        material: "WateringCan_Mat"
+output:
+  Geometry:
+    from: "set_material.Geometry"
+material:
+  name: "WateringCan_Mat"
+  node:
+    - id: "bsdf"
+      type: "ShaderNodeBsdfPrincipled"
+      inputs:
+        Base Color:
+          value: [0.42, 0.74, 0.49, 1.0]
+        Roughness:
+          value: 0.46
+        Alpha:
+          value: 1.0
+  output:
+    Surface:
+      from: "bsdf.BSDF"
